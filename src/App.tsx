@@ -71,6 +71,7 @@ async function deleteBodyWeight(id) {
   await sbFetch(`body_weight?id=eq.${id}`, { method: "DELETE" });
 }
 
+const DEFAULT_PROGRAMS = [
   { id: 1, name: "Styrkeprogram A", days: [
       { id: 101, day: "Måndag", focus: "Bröst & Triceps", exercises: [{name:"Bänkpress",rest:60},{name:"Triceps pushdown",rest:60},{name:"Chest fly",rest:60},{name:"Dips",rest:60}] },
       { id: 102, day: "Onsdag", focus: "Rygg & Biceps", exercises: [{name:"Marklyft",rest:90},{name:"Skivstångsrodd",rest:60},{name:"Bicepscurl",rest:60},{name:"Latsdrag",rest:60}] },
@@ -1036,4 +1037,3 @@ export default function TraningApp() {
     </div>
   );
 }
-
