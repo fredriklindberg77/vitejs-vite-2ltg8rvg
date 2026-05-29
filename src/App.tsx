@@ -56,7 +56,21 @@ async function deleteLogEntry(id) {
   await sbFetch(`workout_log?id=eq.${id}`, { method: "DELETE" });
 }
 
-const DEFAULT_PROGRAMS = [
+async function loadBodyWeight() {
+  const rows = await sbFetch("body_weight?order=date.desc&limit=365");
+  return rows || [];
+}
+async function insertBodyWeight(entry) {
+  const rows = await sbFetch("body_weight", {
+    method: "POST",
+    body: JSON.stringify({ weight: entry.weight, date: entry.date }),
+  });
+  return rows ? rows[0] : null;
+}
+async function deleteBodyWeight(id) {
+  await sbFetch(`body_weight?id=eq.${id}`, { method: "DELETE" });
+}
+
   { id: 1, name: "Styrkeprogram A", days: [
       { id: 101, day: "Måndag", focus: "Bröst & Triceps", exercises: [{name:"Bänkpress",rest:60},{name:"Triceps pushdown",rest:60},{name:"Chest fly",rest:60},{name:"Dips",rest:60}] },
       { id: 102, day: "Onsdag", focus: "Rygg & Biceps", exercises: [{name:"Marklyft",rest:90},{name:"Skivstångsrodd",rest:60},{name:"Bicepscurl",rest:60},{name:"Latsdrag",rest:60}] },
@@ -353,6 +367,275 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
   );
 }
 
+// ── Stats Tab ──
+function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBodyWeight }) {
+  const [statsView, setStatsView] = useState("overview"); // overview | exercise | bodyweight | calendar
+  const [selectedExercise, setSelectedExercise] = useState("");
+  const [bwForm, setBwForm] = useState({ date: new Date().toISOString().slice(0,10), weight: "" });
+
+  // Get unique exercises from log
+  const exercises = [...new Set(log.map(e => e.exercise))].sort();
+
+  // PR per exercise
+  const getPR = (exName) => {
+    const entries = log.filter(e => e.exercise === exName && e.weight);
+    if (!entries.length) return null;
+    return entries.reduce((best, e) => Number(e.weight) > Number(best.weight) ? e : best);
+  };
+
+  // Progress data for selected exercise
+  const getProgressData = (exName) => {
+    const entries = log.filter(e => e.exercise === exName && e.weight);
+    const byDate = {};
+    entries.forEach(e => {
+      if (!byDate[e.date] || Number(e.weight) > Number(byDate[e.date])) byDate[e.date] = Number(e.weight);
+    });
+    return Object.entries(byDate).sort((a,b) => a[0].localeCompare(b[0])).slice(-12);
+  };
+
+  // Trained days for calendar (last 5 weeks)
+  const getTrainedDays = () => {
+    const days = new Set(log.map(e => e.date));
+    const bwDays = new Set(bodyWeight.map(e => e.date));
+    return { workout: days, bw: bwDays };
+  };
+
+  // Simple SVG line chart
+  function LineChart({ data, color = BLUE, unit = "kg" }) {
+    if (data.length < 2) return <div style={{ color:"#334455", fontSize:13, textAlign:"center", padding:20 }}>Behöver minst 2 datapunkter</div>;
+    const vals = data.map(d => d[1]);
+    const min = Math.min(...vals) * 0.97;
+    const max = Math.max(...vals) * 1.03;
+    const w = 300, h = 120;
+    const points = data.map((d, i) => {
+      const x = (i / (data.length - 1)) * (w - 20) + 10;
+      const y = h - ((d[1] - min) / (max - min)) * (h - 20) - 10;
+      return `${x},${y}`;
+    });
+    const latest = data[data.length - 1];
+    const first = data[0];
+    const diff = latest[1] - first[1];
+    return (
+      <div>
+        <svg viewBox={`0 0 ${w} ${h}`} style={{ width:"100%", height:120 }}>
+          <polyline points={points.join(" ")} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          {data.map((d, i) => {
+            const x = (i / (data.length - 1)) * (w - 20) + 10;
+            const y = h - ((d[1] - min) / (max - min)) * (h - 20) - 10;
+            return <circle key={i} cx={x} cy={y} r="4" fill={color}/>;
+          })}
+        </svg>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#334455", marginTop:4 }}>
+          <span>{first[0]}</span>
+          <span style={{ color: diff >= 0 ? "#50e090" : "#ff4466", fontWeight:700 }}>{diff >= 0 ? "+" : ""}{diff.toFixed(1)} {unit}</span>
+          <span>{latest[0]}</span>
+        </div>
+      </div>
+    );
+  }
+
+  async function addBodyWeight() {
+    if (!bwForm.weight) return;
+    try {
+      const saved = await insertBodyWeight(bwForm);
+      setBodyWeight(prev => [saved || { ...bwForm, id: uid() }, ...prev]);
+      setBwForm(f => ({ ...f, weight: "" }));
+    } catch(e) {
+      setBodyWeight(prev => [{ ...bwForm, id: uid() }, ...prev]);
+      setBwForm(f => ({ ...f, weight: "" }));
+    }
+  }
+
+  async function removeBW(id) {
+    try { await deleteBodyWeight(id); } catch(e) {}
+    setBodyWeight(prev => prev.filter(b => b.id !== id));
+  }
+
+  const trainedDays = getTrainedDays();
+  const bwData = [...bodyWeight].sort((a,b) => a.date.localeCompare(b.date)).slice(-12).map(e => [e.date, Number(e.weight)]);
+
+  // Calendar – last 5 weeks
+  function CalendarGrid() {
+    const today = new Date();
+    const days = [];
+    for (let i = 34; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const ds = d.toISOString().slice(0,10);
+      days.push({ ds, day: d.getDate(), worked: trainedDays.workout.has(ds) });
+    }
+    const weekDays = ["M","T","O","T","F","L","S"];
+    return (
+      <div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:4 }}>
+          {weekDays.map(d => <div key={d} style={{ textAlign:"center", fontSize:10, color:"#334455" }}>{d}</div>)}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+          {days.map(({ ds, day, worked }) => (
+            <div key={ds} style={{ aspectRatio:"1", borderRadius:6, background: worked ? BLUE : "#111820", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:worked?800:400, color:worked?"#fff":"#334455" }}>
+              {day}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const subTabs = [
+    { id:"overview", label:"Översikt" },
+    { id:"exercise", label:"Övning" },
+    { id:"bodyweight", label:"Kroppsvikt" },
+    { id:"calendar", label:"Kalender" },
+  ];
+
+  return (
+    <div>
+      {/* Sub tabs */}
+      <div style={{ display:"flex", gap:6, marginBottom:16, overflowX:"auto" }}>
+        {subTabs.map(t => (
+          <button key={t.id} onClick={() => setStatsView(t.id)} style={{ padding:"7px 14px", borderRadius:10, border:"none", cursor:"pointer", fontWeight:700, fontSize:12, whiteSpace:"nowrap", background: statsView===t.id ? `linear-gradient(135deg,${BLUE},${BLUE_DARK})` : "#111820", color: statsView===t.id ? "#fff" : "#4488aa" }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* Overview */}
+      {statsView==="overview" && (
+        <div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+            <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px" }}>
+              <div style={{ fontSize:10, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>Pass totalt</div>
+              <div style={{ fontSize:32, fontWeight:900, color:"#fff" }}>{new Set(log.map(e=>e.date)).size}</div>
+            </div>
+            <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px" }}>
+              <div style={{ fontSize:10, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>Set totalt</div>
+              <div style={{ fontSize:32, fontWeight:900, color:"#fff" }}>{log.length}</div>
+            </div>
+            <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px" }}>
+              <div style={{ fontSize:10, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>Övningar</div>
+              <div style={{ fontSize:32, fontWeight:900, color:"#fff" }}>{exercises.length}</div>
+            </div>
+            <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px" }}>
+              <div style={{ fontSize:10, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>Aktuell vikt</div>
+              <div style={{ fontSize:32, fontWeight:900, color:BLUE }}>{bodyWeight[0]?.weight || "—"}<span style={{ fontSize:14, color:"#4488aa" }}> kg</span></div>
+            </div>
+          </div>
+
+          {/* PRs */}
+          <div style={{ fontSize:12, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:10 }}>🏆 Personliga rekord</div>
+          {exercises.length === 0 && <div style={{ color:"#223344", fontSize:13, textAlign:"center", padding:20 }}>Logga pass för att se rekord!</div>}
+          {exercises.map(ex => {
+            const pr = getPR(ex);
+            if (!pr) return null;
+            return (
+              <div key={ex} style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:12, padding:"12px 16px", marginBottom:8, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14, color:"#c0d8f0" }}>{ex}</div>
+                  <div style={{ fontSize:11, color:"#334455", marginTop:2 }}>{pr.date} · {pr.reps} reps</div>
+                </div>
+                <div style={{ fontSize:22, fontWeight:900, color:BLUE }}>{pr.weight} <span style={{ fontSize:13 }}>kg</span></div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Exercise progress */}
+      {statsView==="exercise" && (
+        <div>
+          <select value={selectedExercise} onChange={e => setSelectedExercise(e.target.value)} style={{ width:"100%", background:"#111820", border:`1px solid ${BLUE_DARK}`, borderRadius:12, padding:"10px 14px", color:"#fff", fontSize:14, fontWeight:700, outline:"none", marginBottom:16 }}>
+            <option value="">Välj övning…</option>
+            {exercises.map(ex => <option key={ex} value={ex}>{ex}</option>)}
+          </select>
+          {selectedExercise && (() => {
+            const data = getProgressData(selectedExercise);
+            const pr = getPR(selectedExercise);
+            return (
+              <div>
+                <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px", marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:12 }}>
+                    <div>
+                      <div style={{ fontSize:10, color:"#3a6888", letterSpacing:2, textTransform:"uppercase" }}>Personligt rekord</div>
+                      <div style={{ fontSize:28, fontWeight:900, color:BLUE }}>{pr?.weight} kg</div>
+                      <div style={{ fontSize:11, color:"#334455" }}>{pr?.date} · {pr?.reps} reps</div>
+                    </div>
+                    <div style={{ fontSize:40 }}>🏆</div>
+                  </div>
+                  <LineChart data={data} color={BLUE} unit="kg"/>
+                </div>
+              </div>
+            );
+          })()}
+          {!selectedExercise && <div style={{ color:"#223344", fontSize:13, textAlign:"center", padding:20 }}>Välj en övning för att se progress</div>}
+        </div>
+      )}
+
+      {/* Body weight */}
+      {statsView==="bodyweight" && (
+        <div>
+          <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:18, marginBottom:16 }}>
+            <div style={{ fontSize:12, color:BLUE, fontWeight:700, letterSpacing:1, marginBottom:12 }}>+ LOGGA KROPPSVIKT</div>
+            <div style={{ display:"flex", gap:10 }}>
+              <input type="date" value={bwForm.date} onChange={e => setBwForm(f => ({ ...f, date: e.target.value }))} style={{ ...inputStyle, flex:1, marginBottom:0 }}/>
+              <input type="number" placeholder="Vikt (kg)" value={bwForm.weight} onChange={e => setBwForm(f => ({ ...f, weight: e.target.value }))} style={{ ...inputStyle, flex:1, marginBottom:0 }}/>
+            </div>
+            <button onClick={addBodyWeight} style={{ width:"100%", padding:"12px", borderRadius:12, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color:"#fff", fontWeight:800, fontSize:14, border:"none", cursor:"pointer", marginTop:10 }}>Logga vikt</button>
+          </div>
+
+          {bwData.length >= 2 && (
+            <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px", marginBottom:16 }}>
+              <div style={{ fontSize:11, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:12 }}>Viktprogression</div>
+              <LineChart data={bwData} color="#50e090" unit="kg"/>
+            </div>
+          )}
+
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {bodyWeight.map(entry => (
+              <div key={entry.id} style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:12, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                <div>
+                  <div style={{ fontSize:11, color:"#334455" }}>{entry.date}</div>
+                  <div style={{ fontSize:22, fontWeight:900, color:BLUE }}>{entry.weight} <span style={{ fontSize:13, color:"#4488aa" }}>kg</span></div>
+                </div>
+                <button onClick={() => removeBW(entry.id)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:16 }}>✕</button>
+              </div>
+            ))}
+            {bodyWeight.length === 0 && <div style={{ color:"#223344", fontSize:13, textAlign:"center", padding:20 }}>Inga vikter loggade ännu!</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Calendar */}
+      {statsView==="calendar" && (
+        <div>
+          <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px", marginBottom:16 }}>
+            <div style={{ fontSize:11, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:14 }}>📅 Senaste 5 veckorna</div>
+            <CalendarGrid/>
+            <div style={{ display:"flex", gap:12, marginTop:14, fontSize:11, color:"#334455" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}><div style={{ width:12, height:12, borderRadius:3, background:BLUE }}/> Träningsdag</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}><div style={{ width:12, height:12, borderRadius:3, background:"#111820" }}/> Vilodag</div>
+            </div>
+          </div>
+
+          <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px" }}>
+            <div style={{ fontSize:11, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:10 }}>Senaste passen</div>
+            {[...new Set(log.map(e => e.date))].sort((a,b) => b.localeCompare(a)).slice(0,10).map(date => {
+              const dayLog = log.filter(e => e.date === date);
+              const exs = [...new Set(dayLog.map(e => e.exercise))];
+              return (
+                <div key={date} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #1a2a3a" }}>
+                  <div>
+                    <div style={{ fontSize:12, color:BLUE, fontWeight:700 }}>{date}</div>
+                    <div style={{ fontSize:11, color:"#4488aa", marginTop:2 }}>{exs.slice(0,3).join(", ")}{exs.length > 3 ? ` +${exs.length-3}` : ""}</div>
+                  </div>
+                  <div style={{ fontSize:12, color:"#334455" }}>{dayLog.length} set</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TraningApp() {
   const [tab, setTab] = useState("program");
   const [programs, setPrograms] = useState(DEFAULT_PROGRAMS);
@@ -363,6 +646,7 @@ export default function TraningApp() {
   const [addingExercise, setAddingExercise] = useState({});
   const [addingRest, setAddingRest] = useState({});
   const [log, setLog] = useState([]);
+  const [bodyWeight, setBodyWeight] = useState([]);
   const [logForm, setLogForm] = useState({ date:new Date().toISOString().slice(0,10), exercise:"", sets:"", reps:"", weight:"" });
   const [restDuration, setRestDuration] = useState(60);
   const [activeDay, setActiveDay] = useState(null);
@@ -389,9 +673,10 @@ export default function TraningApp() {
   useEffect(() => {
     async function loadAll() {
       try {
-        const [savedPrograms, savedLog] = await Promise.all([loadPrograms(), loadLog()]);
+        const [savedPrograms, savedLog, savedBW] = await Promise.all([loadPrograms(), loadLog(), loadBodyWeight()]);
         if (savedPrograms) setPrograms(savedPrograms);
         if (savedLog) setLog(savedLog);
+        if (savedBW) setBodyWeight(savedBW);
       } catch(e) {
         console.error("Load error:", e);
       } finally {
@@ -500,7 +785,7 @@ export default function TraningApp() {
   function resetInterval(){setIntervalRunning(false);setIntervalPhase("work");setIntervalRound(1);setIntervalTime(intervals.work);}
 
   const selectedProgram=programs.find(p=>p.id===selectedProgramId)||programs[0];
-  const tabs=[{id:"program",label:"Program",icon:"📋"},{id:"logg",label:"Loggbok",icon:"📝"},{id:"timer",label:"Timer",icon:"⏱"}];
+  const tabs=[{id:"program",label:"Program",icon:"📋"},{id:"logg",label:"Loggbok",icon:"📝"},{id:"stats",label:"Statistik",icon:"📊"},{id:"timer",label:"Timer",icon:"⏱"}];
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#080c10", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
@@ -542,11 +827,17 @@ export default function TraningApp() {
 
         {tab==="program"&&(
           <div>
-            <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
-              {programs.map(p=>(
-                <button key={p.id} onClick={()=>{setSelectedProgramId(p.id);setEditMode(false);}} style={{ padding:"9px 14px", borderRadius:12, background:selectedProgramId===p.id?`linear-gradient(135deg,${BLUE},${BLUE_DARK})`:"#111820", color:selectedProgramId===p.id?"#fff":"#4488aa", border:"none", cursor:"pointer", fontWeight:700, fontSize:13 }}>{p.name}</button>
-              ))}
-              <button onClick={()=>setShowNewProgram(v=>!v)} style={{ padding:"9px 14px", borderRadius:12, background:"#0a1a10", color:"#50e090", border:"1px dashed #207050", cursor:"pointer", fontWeight:700, fontSize:13 }}>+ Nytt</button>
+            <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center" }}>
+              <select
+                value={selectedProgramId}
+                onChange={e => { setSelectedProgramId(Number(e.target.value)||e.target.value); setEditMode(false); }}
+                style={{ flex:1, background:"#111820", border:`1px solid ${BLUE_DARK}`, borderRadius:12, padding:"10px 14px", color:"#fff", fontSize:14, fontWeight:700, outline:"none", cursor:"pointer", appearance:"none", backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300aaff' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center" }}
+              >
+                {programs.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <button onClick={()=>setShowNewProgram(v=>!v)} style={{ padding:"10px 14px", borderRadius:12, background:"#0a1a10", color:"#50e090", border:"1px dashed #207050", cursor:"pointer", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>+ Nytt</button>
             </div>
             {showNewProgram&&(
               <div style={{ display:"flex", gap:8, marginBottom:14 }}>
@@ -673,6 +964,10 @@ export default function TraningApp() {
           </div>
         )}
 
+        {tab==="stats"&&(
+          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={insertBodyWeight} deleteBodyWeight={deleteBodyWeight}/>
+        )}
+
         {tab==="timer"&&(
           <div>
             <div style={{ display:"flex", gap:10, marginBottom:24 }}>
@@ -741,3 +1036,4 @@ export default function TraningApp() {
     </div>
   );
 }
+
