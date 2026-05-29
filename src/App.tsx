@@ -797,6 +797,8 @@ export default function TraningApp() {
 
   return (
     <div style={{ minHeight:"100vh", background:"#080c10", color:"#d0e4f0", fontFamily:"'DM Sans','Segoe UI',sans-serif", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" }}>
+      <style>{`body { background: #080c10 !important; margin: 0; }`}</style>
+      <style>{`body,html{background:#080c10!important;margin:0;padding:0}`}</style>
       <div style={{ padding:"16px 20px 12px", background:"linear-gradient(180deg,#0d1520,#080c10)", borderBottom:"1px solid #1a2a3a" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
