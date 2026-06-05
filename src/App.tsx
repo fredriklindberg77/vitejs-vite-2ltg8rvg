@@ -382,14 +382,142 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
   );
 }
 
-function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration }) {
+function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod }) {
   const [showRestPopup, setShowRestPopup] = useState(false);
   const [nextSet, setNextSet] = useState(null);
   const [exercises, setExercises] = useState(day.exercises.map(e => ({ ...e, uid: uid() })));
   const [newExName, setNewExName] = useState("");
   const [showAddEx, setShowAddEx] = useState(false);
+  const [wodResult, setWodResult] = useState("");
+  const [wodWeight, setWodWeight] = useState("");
+  const [wodLogged, setWodLogged] = useState(false);
 
   function handleStartRest(next) { setNextSet(next); if(next?.rest) setRestDuration(next.rest); setShowRestPopup(true); }
+
+  function addExercise() {
+    if (!newExName.trim()) return;
+    setExercises(prev => [...prev, { name: newExName.trim(), rest: restDuration, uid: uid() }]);
+    setNewExName(""); setShowAddEx(false);
+  }
+  function moveUp(idx) { if (idx === 0) return; setExercises(prev => { const a = [...prev]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; return a; }); }
+  function moveDown(idx) { setExercises(prev => { if (idx >= prev.length-1) return prev; const a = [...prev]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; return a; }); }
+  function removeExercise(idx) { setExercises(prev => prev.filter((_,i) => i !== idx)); }
+
+  function logWodResult() {
+    if (!wodResult) return;
+    const isAmrap = /amrap/i.test(day.focus);
+    onLogSet({
+      exercise: day.focus || "WOD",
+      sets: "1",
+      reps: isAmrap ? wodResult : "1",
+      weight: wodWeight || "",
+      date: new Date().toISOString().slice(0,10)
+    });
+    setWodLogged(true);
+  }
+
+  return (
+    <div>
+      {showRestPopup && (
+        <RestPopup restDuration={restDuration} setRestDuration={setRestDuration} onClose={() => setShowRestPopup(false)} nextSet={nextSet} />
+      )}
+
+      {/* Pass banner */}
+      <div style={{ background:`linear-gradient(135deg,#0a1828,#0a0e14)`, border:`1px solid ${BLUE_DARK}`, borderRadius:16, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div>
+          <div style={{ fontSize:10, color:BLUE, letterSpacing:3, textTransform:"uppercase", marginBottom:2 }}>⚡ {day.focus}</div>
+          <div style={{ fontSize:28, fontWeight:900, color:"#fff", fontVariantNumeric:"tabular-nums" }}>{formatTime(passSeconds)}</div>
+        </div>
+        <button onClick={onFinish} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontWeight:800, fontSize:13 }}>⏹ Avsluta</button>
+      </div>
+
+      {/* WOD mode - show exercises as checklist + single result input */}
+      {isWod ? (
+        <div>
+          {/* Exercise checklist */}
+          <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"14px 16px", marginBottom:14 }}>
+            <div style={{ fontSize:11, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:10 }}>Övningar</div>
+            {exercises.map((ex, idx) => (
+              <div key={ex.uid} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #1a2a3a" }}>
+                <div style={{ width:22, height:22, borderRadius:6, background:BLUE_DIM, color:BLUE, fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{idx+1}</div>
+                <span style={{ fontSize:14, color:"#c0d8f0", flex:1 }}>{ex.name||ex}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Result logging */}
+          <div style={{ background:"#0d1117", border:`1px solid ${wodLogged ? "#207050" : "#1a2a3a"}`, borderRadius:16, padding:"16px 18px", marginBottom:14 }}>
+            <div style={{ fontSize:11, color: wodLogged ? "#50e090" : BLUE, letterSpacing:2, textTransform:"uppercase", marginBottom:12 }}>
+              {/amrap/i.test(day.focus) ? "🏆 Antal rundor" : "⏱ Din tid"}
+            </div>
+            {wodLogged ? (
+              <div style={{ textAlign:"center", fontSize:22, fontWeight:900, color:"#50e090", padding:"10px 0" }}>✓ Loggat: {wodResult}</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <div style={{ display:"flex", gap:10 }}>
+                  <div style={{ flex:2 }}>
+                    <div style={{ fontSize:10, color:"#334455", letterSpacing:1, marginBottom:4 }}>{/amrap/i.test(day.focus) ? "RUNDOR" : "TID"}</div>
+                    <input
+                      placeholder={/amrap/i.test(day.focus) ? "t.ex. 8+3" : "t.ex. 14:32"}
+                      value={wodResult}
+                      onChange={e => setWodResult(e.target.value)}
+                      style={{ width:"100%", background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"12px 14px", color:"#fff", fontSize:16, fontWeight:700, outline:"none", boxSizing:"border-box" }}
+                    />
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:10, color:"#334455", letterSpacing:1, marginBottom:4 }}>VIKT (KG)</div>
+                    <input
+                      placeholder="t.ex. 32"
+                      value={wodWeight}
+                      onChange={e => setWodWeight(e.target.value)}
+                      type="number"
+                      style={{ width:"100%", background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:10, padding:"12px 14px", color:BLUE, fontSize:16, fontWeight:700, outline:"none", boxSizing:"border-box" }}
+                    />
+                  </div>
+                </div>
+                <button onClick={logWodResult} disabled={!wodResult} style={{ padding:"13px", borderRadius:10, border:"none", cursor:wodResult?"pointer":"default", background:wodResult?`linear-gradient(135deg,${BLUE},${BLUE_DARK})`:"#1a2a3a", color:"#fff", fontWeight:800, fontSize:14 }}>Logga</button>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Normal strength mode */
+        <div>
+          {exercises.map((ex, idx) => (
+            <div key={ex.uid}>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, paddingLeft:4 }}>
+                <span style={{ fontSize:12, color:"#3a6888", flex:1, fontWeight:700 }}>{ex.name||ex}</span>
+                <button onClick={() => moveUp(idx)} style={{ background:"#111820", border:"none", color:"#4488aa", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>↑</button>
+                <button onClick={() => moveDown(idx)} style={{ background:"#111820", border:"none", color:"#4488aa", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>↓</button>
+                <button onClick={() => removeExercise(idx)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>✕</button>
+              </div>
+              <ExerciseCard exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest}/>
+            </div>
+          ))}
+
+          {showAddEx ? (
+            <div style={{ display:"flex", gap:8, marginTop:8, marginBottom:8 }}>
+              <input placeholder="Ny övning…" value={newExName} onChange={e=>setNewExName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addExercise()} style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 14px", color:"#d0e4f0", fontSize:14, outline:"none" }}/>
+              <button onClick={addExercise} style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontWeight:800, fontSize:14 }}>+ Lägg till</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowAddEx(true)} style={{ width:"100%", padding:"11px", borderRadius:12, border:`1px dashed ${BLUE_DARK}`, background:"transparent", color:BLUE, fontWeight:700, fontSize:13, cursor:"pointer", marginTop:8, marginBottom:8 }}>+ Lägg till övning</button>
+          )}
+
+          <div style={{ background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px", marginTop:8 }}>
+            <div style={{ fontSize:11, color:"#3a7aaa", letterSpacing:3, textTransform:"uppercase", marginBottom:10 }}>😴 Vilotid</div>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              {[30,60,90,120].map(sec => (
+                <button key={sec} onClick={() => setRestDuration(sec)} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"none", cursor:"pointer", fontSize:13, fontWeight:700, background:restDuration===sec?BLUE:"#111820", color:restDuration===sec?"#fff":"#4488aa" }}>{sec}s</button>
+              ))}
+              <input type="number" value={restDuration} min={5} max={600} onChange={e=>setRestDuration(Number(e.target.value))} style={{ width:56, background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:8, padding:"7px 6px", color:"#d0e4f0", fontSize:13, outline:"none", textAlign:"center", fontWeight:700 }}/>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
   function addExercise() {
     if (!newExName.trim()) return;
@@ -944,9 +1072,9 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
       const intermediate = extractExercises(intBlock);
       const beginner = extractExercises(begBlock);
 
-      // Notes - weight lines
-      const notesLines = rxBlock.match(/[♀♂][^\n]{0,60}/g) || [];
-      const notes = notesLines.map(convertUnits).join(" | ");
+      // Notes - weight lines from all blocks
+      const allNotesLines = (text.slice(wodStart, resStart > 0 ? resStart : wodStart + 5000).match(/[♀♂][^\n]{0,60}/g) || []);
+      const notes = [...new Set(allNotesLines)].map(convertUnits).join(" | ");
 
       // Named workout detection
       const namedMatch = rxBlock.match(/^##\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/m);
@@ -1093,9 +1221,19 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
             {imported ? (
               <div style={{ textAlign:"center", color:"#50e090", fontWeight:800, fontSize:15, padding:"12px" }}>✓ Importerat! Öppnar program…</div>
             ) : (
-              <button onClick={importAsProgram} style={{ width:"100%", padding:"13px", borderRadius:12, background:"linear-gradient(135deg,#207050,#105030)", color:"#fff", fontWeight:800, fontSize:15, border:"none", cursor:"pointer" }}>
-                ➕ Importera som program
-              </button>
+              <div style={{ display:"flex", gap:10 }}>
+                <button onClick={importAsProgram} style={{ flex:1, padding:"13px", borderRadius:12, background:"linear-gradient(135deg,#207050,#105030)", color:"#fff", fontWeight:800, fontSize:15, border:"none", cursor:"pointer" }}>
+                  ➕ Importera
+                </button>
+                <button onClick={() => {
+                  const exercises = (level === "rx" ? wod.rx : level === "intermediate" ? wod.intermediate : wod.beginner);
+                  const useEx = (exercises && exercises.length > 0) ? exercises : wod.rx || [];
+                  const day = { id: uid(), day: "Dag 1", focus: `${wod.description} – ${wod.title}`, exercises: useEx.map(ex => ({ name: ex, rest: 60 })) };
+                  startWorkout(day, true);
+                }} style={{ flex:1, padding:"13px", borderRadius:12, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color:"#fff", fontWeight:800, fontSize:15, border:"none", cursor:"pointer" }}>
+                  ▶ Kör nu
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1126,6 +1264,7 @@ export default function TraningApp() {
   const [logForm, setLogForm] = useState({ date:new Date().toISOString().slice(0,10), exercise:"", sets:"", reps:"", weight:"" });
   const [restDuration, setRestDuration] = useState(60);
   const [activeDay, setActiveDay] = useState(null);
+  const [activeIsWod, setActiveIsWod] = useState(false);
   const [selectedLogDate, setSelectedLogDate] = useState(null);
   const [passActive, setPassActive] = useState(false);
   const wakeLockRef = useRef(null);
@@ -1236,7 +1375,7 @@ export default function TraningApp() {
     return()=>clearInterval(intervalRef.current);
   }, [intervalRunning, intervals, intervalPhase]);
 
-  function startWorkout(day) { setActiveDay(day); setPassActive(true); setPassSeconds(0); setTab("logg"); }
+  function startWorkout(day, isWod=false) { setActiveDay(day); setActiveIsWod(isWod); setPassActive(true); setPassSeconds(0); setTab("logg"); }
   function finishWorkout() { setActiveDay(null); setPassActive(false); setPassSeconds(0); }
 
   async function handleLogSet(entry) {
@@ -1422,7 +1561,7 @@ export default function TraningApp() {
         {tab==="logg"&&(
           <div>
             {activeDay?(
-              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration}/>
+              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod}/>
             ):(
               <div>
                 <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:18, padding:20, marginBottom:16 }}>
