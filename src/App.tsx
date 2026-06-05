@@ -31,12 +31,19 @@ async function loadPrograms() {
 }
 
 async function savePrograms(data) {
-  // upsert single row with fixed id
-  await sbFetch("programs", {
-    method: "POST",
-    headers: { "Prefer": "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify({ id: "00000000-0000-0000-0000-000000000001", data, updated_at: new Date().toISOString() }),
-  });
+  // First try to update existing row
+  const existing = await sbFetch("programs?id=eq.00000000-0000-0000-0000-000000000001");
+  if (existing && existing.length > 0) {
+    await sbFetch("programs?id=eq.00000000-0000-0000-0000-000000000001", {
+      method: "PATCH",
+      body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
+    });
+  } else {
+    await sbFetch("programs", {
+      method: "POST",
+      body: JSON.stringify({ id: "00000000-0000-0000-0000-000000000001", data, updated_at: new Date().toISOString() }),
+    });
+  }
 }
 
 async function loadLog() {
@@ -675,11 +682,12 @@ export default function TraningApp() {
     async function loadAll() {
       try {
         const [savedPrograms, savedLog, savedBW] = await Promise.all([loadPrograms(), loadLog(), loadBodyWeight()]);
-        if (savedPrograms) setPrograms(savedPrograms);
+        if (savedPrograms && savedPrograms.length > 0) setPrograms(savedPrograms);
         if (savedLog) setLog(savedLog);
         if (savedBW) setBodyWeight(savedBW);
       } catch(e) {
         console.error("Load error:", e);
+        // Keep default programs if load fails
       } finally {
         setLoading(false);
       }
@@ -699,7 +707,8 @@ export default function TraningApp() {
         setSaveStatus("saved");
         setTimeout(()=>setSaveStatus("idle"), 2000);
       } catch(e) {
-        setSaveStatus("error");
+        console.error("Save error:", e);
+        setSaveStatus("idle"); // Don't show error, just reset
       }
     }, 1000);
   }, [programs]);
@@ -796,9 +805,8 @@ export default function TraningApp() {
   );
 
   return (
-    <div style={{ minHeight:"100vh", background:"#080c10", color:"#d0e4f0", fontFamily:"'DM Sans','Segoe UI',sans-serif", display:"flex", flexDirection:"column" }}>
-      <style>{`html, body { background: #080c10 !important; margin: 0; padding: 0; }`}</style>
-      <style>{`body,html{background:#080c10!important;margin:0;padding:0}`}</style>
+    <div style={{ minHeight:"100vh", width:"100%", background:"#080c10", color:"#d0e4f0", fontFamily:"'DM Sans','Segoe UI',sans-serif", display:"flex", flexDirection:"column", boxSizing:"border-box" }}>
+      <style>{`html,body{background:#080c10!important;margin:0!important;padding:0!important;width:100%;overflow-x:hidden}`}</style>
       <div style={{ padding:"16px 20px 12px", background:"linear-gradient(180deg,#0d1520,#080c10)", borderBottom:"1px solid #1a2a3a" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
