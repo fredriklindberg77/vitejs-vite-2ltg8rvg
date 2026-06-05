@@ -465,52 +465,78 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
 // ── Log Day Group ──
 function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(!!highlighted);
   const groupRef = useRef(null);
-  const exercises = [...new Set(entries.map(e=>e.exercise))];
+
+  // Group entries by exercise
+  const byExercise = entries.reduce((acc, e) => {
+    if (!acc[e.exercise]) acc[e.exercise] = [];
+    acc[e.exercise].push(e);
+    return acc;
+  }, {});
+  const exercises = Object.keys(byExercise);
 
   useEffect(() => {
     if (highlighted && groupRef.current) {
+      setExpanded(true);
       groupRef.current.scrollIntoView({ behavior:"smooth", block:"start" });
     }
   }, [highlighted]);
 
   return (
     <div ref={groupRef} style={{ background:"#0d1117", border:`1px solid ${highlighted ? BLUE : "#1a2a3a"}`, borderRadius:16, marginBottom:12, overflow:"hidden", boxShadow: highlighted ? `0 0 12px ${BLUE}44` : "none" }}>
-      {/* Day header */}
-      <div style={{ padding:"12px 16px", background:"linear-gradient(90deg,#101820,#0d1117)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <div style={{ cursor:"pointer", flex:1 }} onClick={() => setExpanded(v=>!v)}>
-          <div style={{ fontSize:13, fontWeight:800, color:BLUE }}>{date}</div>
-          <div style={{ fontSize:11, color:"#4488aa", marginTop:2 }}>{exercises.join(", ")} · {entries.length} set</div>
+      {/* Day header - click to expand */}
+      <div onClick={() => setExpanded(v=>!v)} style={{ padding:"14px 16px", background:"linear-gradient(90deg,#101820,#0d1117)", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:13, fontWeight:800, color:BLUE, marginBottom:3 }}>{date}</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {exercises.map(ex => (
+              <div key={ex} style={{ background:BLUE_DIM, borderRadius:6, padding:"2px 8px", fontSize:11, color:BLUE, fontWeight:700 }}>{ex}</div>
+            ))}
+          </div>
+          <div style={{ fontSize:11, color:"#334455", marginTop:4 }}>{entries.length} set · {exercises.length} övningar</div>
         </div>
-        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          <button onClick={() => setExpanded(v=>!v)} style={{ background:"none", border:"none", color:"#4488aa", cursor:"pointer", fontSize:16 }}>{expanded ? "▲" : "▼"}</button>
-          {!confirmDelete ? (
-            <button onClick={() => setConfirmDelete(true)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:700, fontSize:12 }}>🗑 Radera pass</button>
-          ) : (
-            <div style={{ display:"flex", gap:6 }}>
-              <button onClick={() => { onDeleteDay(entries); setConfirmDelete(false); }} style={{ background:"#ff4466", border:"none", color:"#fff", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:800, fontSize:12 }}>✓ Ja, radera</button>
-              <button onClick={() => setConfirmDelete(false)} style={{ background:"#1a2a3a", border:"none", color:"#aaa", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:700, fontSize:12 }}>Avbryt</button>
-            </div>
-          )}
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ color:"#4488aa", fontSize:18 }}>{expanded ? "▲" : "▼"}</span>
         </div>
       </div>
 
-      {/* Entries */}
+      {/* Expanded content */}
       {expanded && (
-        <div style={{ padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
-          {entries.map(entry => (
-            <div key={entry.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 10px", background:"#0a0e14", borderRadius:10 }}>
-              <div>
-                <div style={{ fontWeight:700, fontSize:14, color:"#c0d8f0" }}>{entry.exercise}</div>
-                <div style={{ fontSize:12, color:"#446688", marginTop:2 }}>
-                  {entry.sets&&`${entry.sets} set`}{entry.reps&&` × ${entry.reps} reps`}
-                  {entry.weight&&<span style={{ color:BLUE, marginLeft:8, fontWeight:700 }}>{entry.weight} kg</span>}
-                </div>
+        <div style={{ padding:"12px 14px" }}>
+          {exercises.map(ex => (
+            <div key={ex} style={{ marginBottom:12 }}>
+              <div style={{ fontSize:13, fontWeight:800, color:"#c0d8f0", marginBottom:6, paddingBottom:4, borderBottom:"1px solid #1a2a3a" }}>{ex}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr 1fr 28px", gap:4, marginBottom:4 }}>
+                <div style={{ fontSize:10, color:"#334455" }}></div>
+                <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>SET</div>
+                <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>REPS</div>
+                <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>KG</div>
+                <div></div>
               </div>
-              <button onClick={() => onDeleteEntry(entry.id)} style={{ background:"none", border:"none", color:"#334455", cursor:"pointer", fontSize:16, padding:"4px 8px" }}>✕</button>
+              {byExercise[ex].map((entry, i) => (
+                <div key={entry.id} style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr 1fr 28px", gap:4, marginBottom:4, alignItems:"center" }}>
+                  <div style={{ width:22, height:22, borderRadius:6, background:BLUE_DIM, color:BLUE, fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>{i+1}</div>
+                  <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, color:"#556677" }}>{i+1}</div>
+                  <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, fontWeight:700, color:"#c0d8f0" }}>{entry.reps||"—"}</div>
+                  <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, fontWeight:700, color:BLUE }}>{entry.weight ? `${entry.weight}` : "—"}</div>
+                  <button onClick={(e) => { e.stopPropagation(); onDeleteEntry(entry.id); }} style={{ background:"none", border:"none", color:"#334455", cursor:"pointer", fontSize:14, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                </div>
+              ))}
             </div>
           ))}
+
+          {/* Delete button */}
+          <div style={{ marginTop:8, paddingTop:8, borderTop:"1px solid #1a2a3a" }}>
+            {!confirmDelete ? (
+              <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }} style={{ width:"100%", padding:"9px", borderRadius:10, background:"#1a0a14", border:"none", color:"#ff4466", fontWeight:700, fontSize:13, cursor:"pointer" }}>🗑 Radera hela passet</button>
+            ) : (
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={(e) => { e.stopPropagation(); onDeleteDay(entries); setConfirmDelete(false); }} style={{ flex:1, padding:"9px", borderRadius:10, background:"#ff4466", border:"none", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>✓ Ja, radera</button>
+                <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }} style={{ flex:1, padding:"9px", borderRadius:10, background:"#1a2a3a", border:"none", color:"#aaa", fontWeight:700, fontSize:13, cursor:"pointer" }}>Avbryt</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
