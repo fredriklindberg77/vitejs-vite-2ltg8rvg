@@ -828,6 +828,171 @@ function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBody
   );
 }
 
+// ── WOD Tab ──
+function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
+  const [wod, setWod] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [imported, setImported] = useState(false);
+  const [level, setLevel] = useState("rx"); // rx | intermediate | beginner
+  const today = new Date().toISOString().slice(0,10).replace(/-/g,"").slice(2);
+
+  async function fetchWOD() {
+    setLoading(true); setError(null); setWod(null); setImported(false);
+    try {
+      // Fetch CrossFit WOD page via Claude API with web search
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{
+            role: "user",
+            content: `Fetch today's CrossFit Workout of the Day from https://www.crossfit.com/workout/ and return ONLY a JSON object with this structure, no other text:
+{
+  "date": "YYYY-MM-DD",
+  "title": "workout name or date",
+  "description": "full workout description in Swedish",
+  "type": "amrap" or "fortime" or "emom" or "strength" or "other",
+  "amrap_minutes": number or null,
+  "rx": ["exercise 1 with reps/weight", "exercise 2 with reps/weight"],
+  "intermediate": ["exercise 1", "exercise 2"],
+  "beginner": ["exercise 1", "exercise 2"],
+  "notes": "any extra info in Swedish"
+}
+Today is ${new Date().toISOString().slice(0,10)}.
+IMPORTANT rules:
+1. Convert ALL imperial to metric: lb→kg (divide by 2.205, round to nearest 2.5), feet→m, miles→km, yards→m, inches→cm
+2. If workout is AMRAP: set type="amrap" and amrap_minutes to the number of minutes. Each exercise gets "(X reps)" format. The user will log total rounds completed as reps.
+3. If workout is "For time": type="fortime"
+4. If strength/lifting: type="strength"
+5. Translate description and notes to Swedish
+6. Include reps AND weight in each exercise string, e.g. "21 Knäböj (70 kg)" or "400m Löpning"`
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data.content.filter(b => b.type === "text").map(b => b.text).join("");
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Kunde inte tolka WOD");
+      const parsed = JSON.parse(jsonMatch[0]);
+      setWod(parsed);
+    } catch(e) {
+      setError("Kunde inte hämta dagens WOD. Försök igen!");
+    }
+    setLoading(false);
+  }
+
+  function importAsProgram() {
+    if (!wod) return;
+    const exercises = (level === "rx" ? wod.rx : level === "intermediate" ? wod.intermediate : wod.beginner) || wod.rx || [];
+    const isAmrap = wod.type === "amrap";
+    const newProgram = {
+      id: uid(),
+      name: `CrossFit WOD ${wod.date || new Date().toISOString().slice(0,10)}`,
+      days: [{
+        id: uid(),
+        day: "Dag 1",
+        focus: wod.title || "CrossFit WOD",
+        exercises: isAmrap
+          ? [{ name: `AMRAP ${wod.amrap_minutes} min: ${exercises.join(" / ")}`, rest: 60 }]
+          : exercises.map(ex => ({ name: ex, rest: 60 }))
+      }]
+    };
+    setPrograms(prev => [newProgram, ...prev]);
+    setSelectedProgramId(newProgram.id);
+    setImported(true);
+    setTimeout(() => { setTab("program"); }, 1500);
+  }
+
+  const displayExercises = wod ? (level === "rx" ? wod.rx : level === "intermediate" ? wod.intermediate : wod.beginner) || wod.rx || [] : [];
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ background:"linear-gradient(135deg,#0a1828,#0a0e14)", border:`1px solid ${BLUE_DARK}`, borderRadius:16, padding:"16px 18px", marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:8 }}>
+          <div style={{ fontSize:28 }}>🏋️</div>
+          <div>
+            <div style={{ fontSize:16, fontWeight:800, color:"#fff" }}>CrossFit WOD</div>
+            <div style={{ fontSize:11, color:"#4488aa" }}>Workout of the Day</div>
+          </div>
+        </div>
+        <button onClick={fetchWOD} disabled={loading} style={{ width:"100%", padding:"12px", borderRadius:12, background: loading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color: loading ? "#4488aa" : "#fff", fontWeight:800, fontSize:14, border:"none", cursor: loading ? "default" : "pointer" }}>
+          {loading ? "⏳ Hämtar dagens WOD…" : "🔄 Hämta dagens WOD"}
+        </button>
+        {error && <div style={{ color:"#ff4466", fontSize:13, marginTop:8, textAlign:"center" }}>{error}</div>}
+      </div>
+
+      {/* WOD result */}
+      {wod && (
+        <div>
+          <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px", marginBottom:14 }}>
+            <div style={{ fontSize:10, color:BLUE, letterSpacing:3, textTransform:"uppercase", marginBottom:6 }}>{wod.date}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+              <div style={{ fontSize:17, fontWeight:800, color:"#fff" }}>{wod.title}</div>
+              {wod.type === "amrap" && (
+                <div style={{ background:"linear-gradient(135deg,#7c2090,#4a1060)", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:800, color:"#e090ff", whiteSpace:"nowrap" }}>
+                  AMRAP {wod.amrap_minutes} min
+                </div>
+              )}
+              {wod.type === "fortime" && (
+                <div style={{ background:"linear-gradient(135deg,#205090,#102840)", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:800, color:BLUE, whiteSpace:"nowrap" }}>
+                  For Time
+                </div>
+              )}
+              {wod.type === "strength" && (
+                <div style={{ background:"linear-gradient(135deg,#207050,#104030)", borderRadius:8, padding:"3px 10px", fontSize:12, fontWeight:800, color:"#50e090", whiteSpace:"nowrap" }}>
+                  Styrka
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize:13, color:"#7098b0", marginBottom:14, lineHeight:1.6 }}>{wod.description}</div>
+
+            {/* Level selector */}
+            <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+              {[{id:"rx",label:"RX"},{id:"intermediate",label:"Intermediate"},{id:"beginner",label:"Beginner"}].map(l => (
+                <button key={l.id} onClick={()=>setLevel(l.id)} style={{ flex:1, padding:"8px 0", borderRadius:10, border:"none", cursor:"pointer", fontWeight:700, fontSize:12, background: level===l.id ? `linear-gradient(135deg,${BLUE},${BLUE_DARK})` : "#111820", color: level===l.id ? "#fff" : "#4488aa" }}>{l.label}</button>
+              ))}
+            </div>
+
+            {/* Exercises */}
+            <div style={{ marginBottom:14 }}>
+              {displayExercises.map((ex, i) => (
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", background:"#0a0e14", borderRadius:10, marginBottom:6 }}>
+                  <div style={{ width:24, height:24, borderRadius:6, background:BLUE_DIM, color:BLUE, fontWeight:900, fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{i+1}</div>
+                  <span style={{ fontSize:14, color:"#c0d8f0" }}>{ex}</span>
+                </div>
+              ))}
+            </div>
+
+            {wod.notes && <div style={{ fontSize:12, color:"#446688", background:"#0a0e14", borderRadius:10, padding:"10px 12px", marginBottom:14 }}>{wod.notes}</div>}
+
+            {/* Import button */}
+            {imported ? (
+              <div style={{ textAlign:"center", color:"#50e090", fontWeight:800, fontSize:15, padding:"12px" }}>✓ Importerat! Öppnar program…</div>
+            ) : (
+              <button onClick={importAsProgram} style={{ width:"100%", padding:"13px", borderRadius:12, background:"linear-gradient(135deg,#207050,#105030)", color:"#fff", fontWeight:800, fontSize:15, border:"none", cursor:"pointer" }}>
+                ➕ Importera som program
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Info when no WOD loaded */}
+      {!wod && !loading && (
+        <div style={{ textAlign:"center", color:"#223344", padding:40, fontSize:14, lineHeight:1.8 }}>
+          Tryck på knappen ovan för att hämta<br/>dagens CrossFit WOD automatiskt!<br/><br/>
+          <span style={{ fontSize:24 }}>🏋️💪🔥</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TraningApp() {
   const [tab, setTab] = useState("program");
   const [programs, setPrograms] = useState(DEFAULT_PROGRAMS);
@@ -1000,7 +1165,7 @@ export default function TraningApp() {
   function resetInterval(){setIntervalRunning(false);setIntervalPhase("work");setIntervalRound(1);setIntervalTime(intervals.work);}
 
   const selectedProgram=programs.find(p=>p.id===selectedProgramId)||programs[0];
-  const tabs=[{id:"program",label:"Program",icon:"📋"},{id:"logg",label:"Loggbok",icon:"📝"},{id:"stats",label:"Statistik",icon:"📊"},{id:"timer",label:"Timer",icon:"⏱"}];
+  const tabs=[{id:"program",label:"Program",icon:"📋"},{id:"logg",label:"Loggbok",icon:"📝"},{id:"stats",label:"Statistik",icon:"📊"},{id:"wod",label:"WOD",icon:"🏋️"},{id:"timer",label:"Timer",icon:"⏱"}];
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#080c10", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
@@ -1183,6 +1348,10 @@ export default function TraningApp() {
 
         {tab==="stats"&&(
           <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={insertBodyWeight} deleteBodyWeight={deleteBodyWeight} onDateClick={(date) => { setSelectedLogDate(date); setTab("logg"); }}/>
+        )}
+
+        {tab==="wod"&&(
+          <WodTab programs={programs} setPrograms={setPrograms} setSelectedProgramId={setSelectedProgramId} setTab={setTab}/>
         )}
 
         {tab==="timer"&&(
