@@ -274,6 +274,7 @@ function playBeep() {
 function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
   const [restSeconds, setRestSeconds] = useState(restDuration);
   const [restRunning, setRestRunning] = useState(true);
+  const [minimized, setMinimized] = useState(false);
   const restRef = useRef(null);
 
   useEffect(() => {
@@ -297,10 +298,37 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
   const r = 54, circ = 2 * Math.PI * r;
   const dash = circ * (restDuration > 0 ? restSeconds / restDuration : 0);
 
+  if (minimized) {
+    return (
+      <div style={{
+        position:"fixed", top:0, left:0, right:0, zIndex:1000,
+        background: done ? "linear-gradient(135deg,#207050,#105030)" : restSeconds <= 10 ? "linear-gradient(135deg,#3a0a1a,#1a0a0a)" : `linear-gradient(135deg,#0a1828,#0a0e14)`,
+        borderBottom:`2px solid ${done ? "#50e090" : restSeconds <= 10 ? "#ff4466" : BLUE}`,
+        padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between",
+      }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <div style={{ fontSize:22, fontWeight:900, color: done ? "#50e090" : restSeconds <= 10 ? "#ff4466" : "#fff", fontVariantNumeric:"tabular-nums" }}>
+            {done ? "✓ Klar!" : `😴 ${formatTime(restSeconds)}`}
+          </div>
+          {nextSet && !done && <div style={{ fontSize:12, color:"#4488aa" }}>{nextSet.exercise} · {nextSet.weight}kg × {nextSet.reps}</div>}
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={() => setMinimized(false)} style={{ background:"#1a2a3a", border:"none", color:BLUE, borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:700, fontSize:13 }}>
+            {done ? "✓ Visa" : "⬆ Visa"}
+          </button>
+          <button onClick={onClose} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:700, fontSize:13 }}>✕</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column" }}>
-      <div style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:28, padding:"36px 32px", display:"flex", flexDirection:"column", alignItems:"center", gap:16, minWidth:280 }}>
-        <div style={{ fontSize:11, color:BLUE, letterSpacing:4, textTransform:"uppercase" }}>😴 Vilar</div>
+      <div style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:28, padding:"36px 32px", display:"flex", flexDirection:"column", alignItems:"center", gap:16, minWidth:280, maxWidth:"90vw" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", width:"100%" }}>
+          <div style={{ fontSize:11, color:BLUE, letterSpacing:4, textTransform:"uppercase" }}>😴 Vilar</div>
+          <button onClick={() => setMinimized(true)} style={{ background:"#1a2a3a", border:"none", color:"#4488aa", borderRadius:8, padding:"5px 12px", cursor:"pointer", fontWeight:700, fontSize:12 }}>⬇ Minimera</button>
+        </div>
 
         {/* Circle timer */}
         <div style={{ position:"relative", width:130, height:130 }}>
