@@ -912,6 +912,8 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
 
       // Extract exercises from a text block
       function extractExercises(block) {
+        // Strip bold markers first so "**4** rope climbs" becomes "4 rope climbs"
+        block = block.replace(/\*\*([^*]+)\*\*/g, "$1");
         // First try splitting on newlines
         let lines = block.split("\n").map(l => l.trim()).filter(Boolean);
         
