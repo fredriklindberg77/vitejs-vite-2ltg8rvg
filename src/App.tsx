@@ -97,18 +97,18 @@ async function deleteBodyWeight(id) {
 
 const DEFAULT_PROGRAMS = [
   { id: 1, name: "Styrkeprogram A", days: [
-      { id: 101, day: "Måndag", focus: "Bröst & Triceps", exercises: [{name:"Bänkpress",rest:60},{name:"Triceps pushdown",rest:60},{name:"Chest fly",rest:60},{name:"Dips",rest:60}] },
-      { id: 102, day: "Onsdag", focus: "Rygg & Biceps", exercises: [{name:"Marklyft",rest:90},{name:"Skivstångsrodd",rest:60},{name:"Bicepscurl",rest:60},{name:"Latsdrag",rest:60}] },
-      { id: 103, day: "Fredag", focus: "Ben & Axlar", exercises: [{name:"Knäböj",rest:120},{name:"Leg press",rest:90},{name:"Axelpress",rest:60},{name:"Lateralhöjning",rest:60}] },
+      { id: 101, day: "Dag 1", focus: "Bröst & Triceps", exercises: [{name:"Bänkpress",rest:60},{name:"Triceps pushdown",rest:60},{name:"Chest fly",rest:60},{name:"Dips",rest:60}] },
+      { id: 102, day: "Dag 2", focus: "Rygg & Biceps", exercises: [{name:"Marklyft",rest:90},{name:"Skivstångsrodd",rest:60},{name:"Bicepscurl",rest:60},{name:"Latsdrag",rest:60}] },
+      { id: 103, day: "Dag 3", focus: "Ben & Axlar", exercises: [{name:"Knäböj",rest:120},{name:"Leg press",rest:90},{name:"Axelpress",rest:60},{name:"Lateralhöjning",rest:60}] },
   ]},
   { id: 2, name: "Helkroppsprogram", days: [
-      { id: 201, day: "Måndag", focus: "Helkropp A", exercises: [{name:"Knäböj",rest:120},{name:"Bänkpress",rest:90},{name:"Skivstångsrodd",rest:60},{name:"Axelpress",rest:60}] },
-      { id: 202, day: "Onsdag", focus: "Helkropp B", exercises: [{name:"Marklyft",rest:90},{name:"Incline press",rest:60},{name:"Latsdrag",rest:60},{name:"Bicepscurl",rest:60}] },
-      { id: 203, day: "Fredag", focus: "Helkropp C", exercises: [{name:"Front squat",rest:120},{name:"Dips",rest:60},{name:"Pullups",rest:60},{name:"Face pulls",rest:60}] },
+      { id: 201, day: "Dag 1", focus: "Helkropp A", exercises: [{name:"Knäböj",rest:120},{name:"Bänkpress",rest:90},{name:"Skivstångsrodd",rest:60},{name:"Axelpress",rest:60}] },
+      { id: 202, day: "Dag 2", focus: "Helkropp B", exercises: [{name:"Marklyft",rest:90},{name:"Incline press",rest:60},{name:"Latsdrag",rest:60},{name:"Bicepscurl",rest:60}] },
+      { id: 203, day: "Dag 3", focus: "Helkropp C", exercises: [{name:"Front squat",rest:120},{name:"Dips",rest:60},{name:"Pullups",rest:60},{name:"Face pulls",rest:60}] },
   ]},
 ];
 
-const DAYS_OF_WEEK = ["Måndag","Tisdag","Onsdag","Torsdag","Fredag","Lördag","Söndag"];
+const DAYS_OF_WEEK = ["Dag 1","Dag 2","Dag 3","Dag 4","Dag 5","Dag 6","Dag 7"];
 const BLUE = "#00aaff", BLUE_DARK = "#0077cc", BLUE_DIM = "#00aaff22";
 
 function formatTime(s) {
@@ -357,16 +357,38 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
 function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration }) {
   const [showRestPopup, setShowRestPopup] = useState(false);
   const [nextSet, setNextSet] = useState(null);
+  const [exercises, setExercises] = useState(day.exercises.map(e => ({ ...e, uid: uid() })));
+  const [newExName, setNewExName] = useState("");
+  const [showAddEx, setShowAddEx] = useState(false);
 
   function handleStartRest(next) { setNextSet(next); if(next?.rest) setRestDuration(next.rest); setShowRestPopup(true); }
 
+  function addExercise() {
+    if (!newExName.trim()) return;
+    setExercises(prev => [...prev, { name: newExName.trim(), rest: restDuration, uid: uid() }]);
+    setNewExName(""); setShowAddEx(false);
+  }
+
+  function moveUp(idx) {
+    if (idx === 0) return;
+    setExercises(prev => { const a = [...prev]; [a[idx-1], a[idx]] = [a[idx], a[idx-1]]; return a; });
+  }
+
+  function moveDown(idx) {
+    setExercises(prev => { if (idx >= prev.length-1) return prev; const a = [...prev]; [a[idx], a[idx+1]] = [a[idx+1], a[idx]]; return a; });
+  }
+
+  function removeExercise(idx) {
+    setExercises(prev => prev.filter((_,i) => i !== idx));
+  }
+
   return (
     <div>
-      {/* Rest popup overlay */}
       {showRestPopup && (
         <RestPopup restDuration={restDuration} setRestDuration={setRestDuration} onClose={() => setShowRestPopup(false)} nextSet={nextSet} />
       )}
 
+      {/* Pass banner */}
       <div style={{ background:`linear-gradient(135deg,#0a1828,#0a0e14)`, border:`1px solid ${BLUE_DARK}`, borderRadius:16, padding:"14px 18px", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
         <div>
           <div style={{ fontSize:10, color:BLUE, letterSpacing:3, textTransform:"uppercase", marginBottom:2 }}>⚡ {day.focus}</div>
@@ -374,11 +396,31 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
         </div>
         <button onClick={onFinish} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontWeight:800, fontSize:13 }}>⏹ Avsluta</button>
       </div>
-      {day.exercises.map((ex,idx) => (
-        <ExerciseCard key={(ex.name||ex)+idx} exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest}/>
+
+      {exercises.map((ex, idx) => (
+        <div key={ex.uid}>
+          {/* Move/remove controls */}
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, paddingLeft:4 }}>
+            <span style={{ fontSize:12, color:"#3a6888", flex:1, fontWeight:700 }}>{ex.name||ex}</span>
+            <button onClick={() => moveUp(idx)} style={{ background:"#111820", border:"none", color:"#4488aa", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>↑</button>
+            <button onClick={() => moveDown(idx)} style={{ background:"#111820", border:"none", color:"#4488aa", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>↓</button>
+            <button onClick={() => removeExercise(idx)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>✕</button>
+          </div>
+          <ExerciseCard exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest}/>
+        </div>
       ))}
 
-      {/* Rest duration setting at bottom */}
+      {/* Add exercise */}
+      {showAddEx ? (
+        <div style={{ display:"flex", gap:8, marginTop:8, marginBottom:8 }}>
+          <input placeholder="Ny övning…" value={newExName} onChange={e=>setNewExName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addExercise()} style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 14px", color:"#d0e4f0", fontSize:14, outline:"none" }}/>
+          <button onClick={addExercise} style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontWeight:800, fontSize:14 }}>+ Lägg till</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowAddEx(true)} style={{ width:"100%", padding:"11px", borderRadius:12, border:`1px dashed ${BLUE_DARK}`, background:"transparent", color:BLUE, fontWeight:700, fontSize:13, cursor:"pointer", marginTop:8, marginBottom:8 }}>+ Lägg till övning</button>
+      )}
+
+      {/* Rest duration */}
       <div style={{ background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:14, padding:"14px 16px", marginTop:8 }}>
         <div style={{ fontSize:11, color:"#3a7aaa", letterSpacing:3, textTransform:"uppercase", marginBottom:10 }}>😴 Vilotid</div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -782,7 +824,7 @@ export default function TraningApp() {
     setPrograms(prev=>[...prev,np]); setSelectedProgramId(np.id); setNewProgramName(""); setShowNewProgram(false); setEditMode(true);
   }
   function deleteProgram(id){const r=programs.filter(p=>p.id!==id);setPrograms(r);if(selectedProgramId===id)setSelectedProgramId(r[0]?.id);}
-  function addDay(pid){setPrograms(prev=>prev.map(p=>p.id!==pid?p:{...p,days:[...p.days,{id:uid(),day:"Måndag",focus:"",exercises:[]}]}));}
+  function addDay(pid){setPrograms(prev=>prev.map(p=>p.id!==pid?p:{...p,days:[...p.days,{id:uid(),day:`Dag ${(p.days.length+1)}`,focus:"",exercises:[]}]}));}
   function updateDay(pid,did,field,val){setPrograms(prev=>prev.map(p=>p.id!==pid?p:{...p,days:p.days.map(d=>d.id===did?{...d,[field]:val}:d)}));}
   function deleteDay(pid,did){setPrograms(prev=>prev.map(p=>p.id!==pid?p:{...p,days:p.days.filter(d=>d.id!==did)}));}
   function addExerciseToDay(pid,did){
