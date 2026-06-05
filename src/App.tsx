@@ -898,16 +898,21 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
             if (/^[♀♂\[\(]/.test(l)) return false;
             if (/stimulus|strategy|intermediate option|beginner option|resources|post time|post rounds|post loads|compare to|find a gym|one shuttle|partition|switch arms|no rest/i.test(l)) return false;
             if (/^https?:|^\./.test(l)) return false;
-            // Must contain a number followed by letters (exercise pattern)
-            return /\d+/.test(l) && /[a-zA-Z]{3}/.test(l);
+            // Must look like an exercise: number + movement name OR movement + number
+            const hasNumber = /\d+/.test(l);
+            const hasMovement = /[a-zA-Z]{3}/.test(l);
+            const looksLikeExercise = /^\d+[-–\d\s,/]*[a-zA-Z]|^[A-Z][a-z].*\d/.test(l);
+            // Also catch "X-calorie" patterns
+            const hasCalorie = /calorie|cal\b/i.test(l);
+            return hasNumber && hasMovement && (looksLikeExercise || hasCalorie);
           })
           .map(convertUnits)
-          .slice(0, 12);
+          .slice(0, 15);
       }
 
       // Split into RX / Intermediate / Beginner sections
-      const intIdx = wodBlock.indexOf("**Intermediate option**");
-      const begIdx = wodBlock.indexOf("**Beginner option**");
+      const intIdx = Math.max(wodBlock.indexOf("**Intermediate option**"), wodBlock.indexOf("Intermediate option:"), wodBlock.indexOf("Intermediate option\n"));
+      const begIdx = Math.max(wodBlock.indexOf("**Beginner option**"), wodBlock.indexOf("Beginner option:"), wodBlock.indexOf("Beginner option\n"));
       const stimIdx = wodBlock.search(/\*\*Stimulus|Post time|Post rounds|Post loads/i);
 
       const rxEnd = intIdx > 0 ? intIdx : (stimIdx > 0 ? stimIdx : wodBlock.length);
