@@ -718,6 +718,26 @@ export default function TraningApp() {
   const [restDuration, setRestDuration] = useState(60);
   const [activeDay, setActiveDay] = useState(null);
   const [passActive, setPassActive] = useState(false);
+  const wakeLockRef = useRef(null);
+
+  // Keep screen on during workout
+  useEffect(() => {
+    async function manageWakeLock() {
+      if (passActive) {
+        try {
+          if ("wakeLock" in navigator) {
+            wakeLockRef.current = await navigator.wakeLock.request("screen");
+          }
+        } catch(e) { console.log("Wake lock failed:", e); }
+      } else {
+        if (wakeLockRef.current) {
+          await wakeLockRef.current.release();
+          wakeLockRef.current = null;
+        }
+      }
+    }
+    manageWakeLock();
+  }, [passActive]);
   const [passSeconds, setPassSeconds] = useState(0);
   const passRef = useRef(null);
   const [saveStatus, setSaveStatus] = useState("idle");
