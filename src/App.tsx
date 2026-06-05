@@ -863,9 +863,15 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
 
       // Find end markers
       const stimStart = text.indexOf("**Stimulus and Strategy", wodStart);
-      const intStart = text.indexOf("**Intermediate option", wodStart);
-      const begStart = text.indexOf("**Beginner option", wodStart);
-      const resStart = text.indexOf("**Resources", wodStart);
+      // Search case-insensitive for section headers with various formats
+      function findSection(haystack, needle, from=0) {
+        const lower = haystack.toLowerCase();
+        const idx = lower.indexOf(needle.toLowerCase(), from);
+        return idx;
+      }
+      const intStart = findSection(text, "intermediate option", wodStart);
+      const begStart = findSection(text, "beginner option", wodStart);
+      const resStart = findSection(text, "resources:", wodStart);
 
       // RX block: from after "Workout of the Day" to Stimulus or Intermediate
       const rxEnd = stimStart > 0 ? stimStart : (intStart > 0 ? intStart : wodStart + 2000);
@@ -897,15 +903,26 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
 
       // Extract exercises from a text block
       function extractExercises(block) {
-        const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+        // First try splitting on newlines
+        let lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+        
+        // If we only get a few long lines, the text is compressed - split on exercise patterns
+        const isCompressed = lines.length < 5 && block.length > 100;
+        if (isCompressed) {
+          // Split on patterns like "21 " before exercise names or number sequences
+          lines = block
+            .replace(/(\d+[-–]?\s+(?:rope|dumbbell|pull|calorie|cal\b|farmers|deadlift|bike|row|run|box|burpee|squat|press|snatch|clean|jerk|toes|knees|barbell|kettlebell|jump|sit|push))/gi, "\n$1")
+            .split("\n")
+            .map(l => l.trim())
+            .filter(Boolean);
+        }
+
         const result = [];
         for (const line of lines) {
-          // Skip navigation, headers, links, metadata
           if (/^#+\s|^\[|^http|^\*\*|^One shuttle|^Post time|^Post rounds|^♀|^♂|^Compare|^Find a gym/i.test(line)) continue;
           if (/certificate course|open a crossfit|what is crossfit|find a gym|workout of the day|stimulus|strategy|intermediate option|beginner option|resources|shop rogue|subscribe/i.test(line)) continue;
-          // Must start with a number (reps) or be a named movement
-          if (/^\d/.test(line) && /[a-zA-Z]{3}/.test(line) && line.length < 100) {
-            result.push(convertUnits(line));
+          if (/^\d/.test(line) && /[a-zA-Z]{3}/.test(line) && line.length < 120) {
+            result.push(convertUnits(line.replace(/\.$/, "").trim()));
           }
           if (result.length >= 15) break;
         }
@@ -929,9 +946,6 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
                  type === "fortime" ? "For Time" :
                  type === "strength" ? "Styrka" : "WOD";
 
-      console.log("=== RX BLOCK FIRST 800 ===");
-      console.log(rxBlock.slice(0, 800));
-      console.log("=== RX exercises:", rx);
       if (rx.length === 0) throw new Error("Hittade inga övningar – försök igen");
 
       setWod({ date: today, title, description: desc, type, amrap_minutes: amrapMinutes, rounds, rx, intermediate, beginner, notes });
