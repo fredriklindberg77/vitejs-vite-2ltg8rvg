@@ -929,6 +929,9 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
                  type === "fortime" ? "For Time" :
                  type === "strength" ? "Styrka" : "WOD";
 
+      console.log("=== RX BLOCK FIRST 800 ===");
+      console.log(rxBlock.slice(0, 800));
+      console.log("=== RX exercises:", rx);
       if (rx.length === 0) throw new Error("Hittade inga övningar – försök igen");
 
       setWod({ date: today, title, description: desc, type, amrap_minutes: amrapMinutes, rounds, rx, intermediate, beginner, notes });
