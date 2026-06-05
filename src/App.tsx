@@ -856,10 +856,19 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
           .replace(/(\d+(?:\.\d+)?)\s*(yards?|yd)\b/gi, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
       }
 
-      // The page has a clear "## Workout of the Day" heading
-      // Find workout section between "Workout of the Day" and "Stimulus and Strategy"
-      const wodStart = text.indexOf("Workout of the Day");
+      // Find workout section - try multiple patterns
+      let wodStart = text.indexOf("Workout of the Day");
+      if (wodStart === -1) wodStart = text.indexOf("For time:");
+      if (wodStart === -1) wodStart = text.indexOf("For time");
+      if (wodStart === -1) wodStart = text.indexOf("AMRAP");
       if (wodStart === -1) throw new Error("Hittade inte WOD-sektionen");
+      // Skip forward past "Workout of the Day" header to actual content
+      const contentStart = text.indexOf("For time", wodStart);
+      const amrapIdx = text.indexOf("AMRAP", wodStart);
+      const strengthIdx = text.indexOf("For load", wodStart);
+      if (contentStart > 0 && contentStart < wodStart + 500) wodStart = contentStart;
+      else if (amrapIdx > 0 && amrapIdx < wodStart + 500) wodStart = amrapIdx;
+      else if (strengthIdx > 0 && strengthIdx < wodStart + 500) wodStart = strengthIdx;
 
       // Find end markers
       const stimStart = text.indexOf("**Stimulus and Strategy", wodStart);
