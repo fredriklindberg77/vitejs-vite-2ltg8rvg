@@ -843,11 +843,13 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
       const today = new Date().toISOString().slice(0,10);
       const dateCode = today.replace(/-/g,"").slice(2); // e.g. "260605"
 
-      // Fetch today's specific WOD page via CORS proxy
-      const url = `https://www.crossfit.com/${dateCode}`;
-      const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
-      const res = await fetch(proxyUrl);
-      if (!res.ok) throw new Error("Kunde inte nå CrossFit");
+      // Use Supabase Edge Function as proxy
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod`, {
+        headers: {
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+        }
+      });
+      if (!res.ok) throw new Error("Edge function fel");
       const html = await res.text();
 
       // Parse the HTML
