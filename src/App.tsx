@@ -842,7 +842,6 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
     try {
       const today = new Date().toISOString().slice(0,10);
 
-      // Fetch via Supabase Edge Function
       const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod`, {
         headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
       });
@@ -850,73 +849,94 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
       const { text } = await res.json();
       if (!text) throw new Error("Inget innehåll");
 
-      // Parse workout from text
-      const lines = text.split(/\s{2,}|\n/).map(l => l.trim()).filter(l => l.length > 3);
+      function convertUnits(s) {
+        return s
+          .replace(/(\d+(?:\.\d+)?)\s*(lb|lbs|pounds?)/gi, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
+          .replace(/(\d+(?:\.\d+)?)\s*(feet|foot|ft)\b/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
+          .replace(/(\d+(?:\.\d+)?)\s*miles?\b/gi, (_, n) => `${(Number(n)*1.609).toFixed(2)} km`)
+          .replace(/(\d+(?:\.\d+)?)\s*(yards?|yd)\b/gi, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
+      }
 
-      // Detect workout type
+      // Find the workout section - it starts after "For time:" or "AMRAP" etc
+      // and ends before "Stimulus" or "Post time"
       let type = "fortime";
       let amrapMinutes = null;
       let title = `WOD ${today}`;
-      let exercises = [];
-      let notes = "";
+      let rx = [], intermediate = [], beginner = [];
 
-      for (const line of lines) {
-        if (/AMRAP/i.test(line)) {
-          type = "amrap";
-          const m = line.match(/(\d+)[\s-]*min/i);
-          if (m) amrapMinutes = parseInt(m[1]);
-        }
-        if (/Rest Day/i.test(line)) { type = "rest"; break; }
+      // Extract the core workout block
+      // Pattern: find "For time:" section with exercises
+      const wodMatch = text.match(/For time[:\s]+([\s\S]{20,800})(?:Stimulus|Post time|Intermediate option)/i);
+      const amrapMatch = text.match(/(\d+)[-\s]minute AMRAP[:\s]+([\s\S]{20,500})(?:Stimulus|Post time|Intermediate option)/i);
+      const strengthMatch = text.match(/([A-Z][^.]+(?:sets|reps|max|1RM)[^.]{10,200})/i);
+
+      let workoutText = "";
+      if (amrapMatch) {
+        type = "amrap";
+        amrapMinutes = parseInt(amrapMatch[1]);
+        workoutText = amrapMatch[2];
+      } else if (wodMatch) {
+        type = "fortime";
+        workoutText = wodMatch[1];
+      } else {
+        // Fallback: look for rep schemes
+        const repMatch = text.match(/(\d+[-–]\d+[-–]\d+[^.]{5,60})/g);
+        if (repMatch) workoutText = repMatch.join(" | ");
       }
 
-      // Find workout section - look for numbered reps or exercise patterns
-      const exPattern = /^(\d+[-–]\d+[-–]\d+|\d+)\s+(.{5,60})$/;
-      const weightPattern = /(\d+(?:\.\d+)?)\s*(lb|lbs|pound)/gi;
-      const feetPattern = /(\d+(?:\.\d+)?)\s*(feet|foot|ft|')/gi;
-      const milePattern = /(\d+(?:\.\d+)?)\s*(miles?|mi)\b/gi;
-      const yardPattern = /(\d+(?:\.\d+)?)\s*(yards?|yd)/gi;
+      // Parse exercises from workout text
+      if (workoutText) {
+        const exLines = workoutText
+          .split(/(?:\d+\s+calorie|\d+[-–]\d+|\d+\s+(?:rope|pull|row|dead|squat|press|farmer|dumbbell|kettlebell|box|burpee|run|bike|climb|jump|sit|push|lunge|thruster|hang|snatch|clean|jerk|toes|knees|double))/i)
+          .filter(Boolean);
 
-      function convertUnits(s) {
-        return s
-          .replace(weightPattern, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
-          .replace(feetPattern, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
-          .replace(milePattern, (_, n) => `${(Number(n)*1.609).toFixed(2)} km`)
-          .replace(yardPattern, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
-      }
-
-      // Collect exercise lines
-      let inWorkout = false;
-      for (const line of lines) {
-        const converted = convertUnits(line);
-        if (/for time|rounds for time|complete the following/i.test(line)) { inWorkout = true; continue; }
-        if (inWorkout && /stimulus|strategy|scaling|intermediate option|beginner option|score/i.test(line)) break;
-        if (inWorkout && converted.length > 5 && converted.length < 80) {
-          exercises.push(converted);
-          if (exercises.length >= 8) break;
-        }
-        // Also grab lines that look like exercises even without "for time"
-        if (!inWorkout && exPattern.test(line) && exercises.length < 8) {
-          exercises.push(convertUnits(line));
-        }
-      }
-
-      // If no exercises found, grab any lines with numbers + action words
-      if (exercises.length === 0) {
-        for (const line of lines) {
-          if (/\d+.*(rope|pull|row|run|dead|squat|press|snatch|clean|jerk|burpee|swing|carry|bike|climb|jump|sit.up|push|lunge|thruster|box)/i.test(line)) {
-            exercises.push(convertUnits(line));
-            if (exercises.length >= 6) break;
+        // Better: find lines with numbers + exercise names
+        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+(?:\.\d+)?(?:\s*[-–]\s*\d+)?)\s+([A-Za-z][A-Za-z\s\-()]{4,50})/g;
+        let match;
+        const found = new Set();
+        while ((match = exercisePattern.exec(workoutText)) !== null) {
+          const ex = convertUnits(`${match[1]} ${match[2].trim()}`);
+          if (!found.has(ex) && ex.length < 80) {
+            found.add(ex);
+            rx.push(ex);
           }
+          if (rx.length >= 8) break;
         }
       }
 
-      if (exercises.length === 0) throw new Error("Kunde inte hitta övningar – försök igen om en stund");
+      // Extract intermediate option
+      const intMatch = text.match(/Intermediate option[:\s]+For time[:\s]+([\s\S]{20,500})(?:Beginner option|Stimulus|Post time)/i);
+      if (intMatch) {
+        let match;
+        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+)\s+([A-Za-z][A-Za-z\s\-()]{4,50})/g;
+        while ((match = exercisePattern.exec(intMatch[1])) !== null) {
+          intermediate.push(convertUnits(`${match[1]} ${match[2].trim()}`));
+          if (intermediate.length >= 8) break;
+        }
+      }
 
-      // Try to find title
-      const titleLine = lines.find(l => /^\d{6}$/.test(l) || /workout of the day/i.test(l));
-      if (titleLine) title = titleLine;
+      // Extract beginner option
+      const begMatch = text.match(/Beginner option[:\s]+For time[:\s]+([\s\S]{20,500})(?:Stimulus|Post time|Resources|$)/i);
+      if (begMatch) {
+        let match;
+        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+)\s+([A-Za-z][A-Za-z\s\-()]{4,50})/g;
+        while ((match = exercisePattern.exec(begMatch[1])) !== null) {
+          beginner.push(convertUnits(`${match[1]} ${match[2].trim()}`));
+          if (beginner.length >= 8) break;
+        }
+      }
 
-      setWod({ date: today, title, description: exercises.slice(0,2).join(" | "), type, amrap_minutes: amrapMinutes, rx: exercises, intermediate: [], beginner: [], notes });
+      if (rx.length === 0) throw new Error("Kunde inte tolka övningarna – CrossFit kan ha ändrat sin layout");
+
+      // Extract title
+      const titleMatch = text.match(/Workout of the Day\s+(\d+)/i);
+      if (titleMatch) title = `260${titleMatch[1]}`;
+
+      // Notes - weights
+      const notesMatch = text.match(/[♀♂]\s*\d+[-–]\d+[^\n.]{0,60}/g);
+      const notes = notesMatch ? notesMatch.slice(0,2).join(" | ").replace(/[♀♂]/g, m => m === "♀" ? "Kvinna" : "Man") : "";
+
+      setWod({ date: today, title, description: `${type === "amrap" ? `AMRAP ${amrapMinutes} min` : "For Time"}`, type, amrap_minutes: amrapMinutes, rx, intermediate, beginner, notes });
     } catch(e) {
       console.error(e);
       setError("Kunde inte hämta WOD: " + e.message);
