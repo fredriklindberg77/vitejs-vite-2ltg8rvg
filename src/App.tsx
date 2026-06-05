@@ -840,47 +840,83 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
   async function fetchWOD() {
     setLoading(true); setError(null); setWod(null); setImported(false);
     try {
-      // Fetch CrossFit WOD page via Claude API with web search
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{
-            role: "user",
-            content: `Fetch today's CrossFit Workout of the Day from https://www.crossfit.com/workout/ and return ONLY a JSON object with this structure, no other text:
-{
-  "date": "YYYY-MM-DD",
-  "title": "workout name or date",
-  "description": "full workout description in Swedish",
-  "type": "amrap" or "fortime" or "emom" or "strength" or "other",
-  "amrap_minutes": number or null,
-  "rx": ["exercise 1 with reps/weight", "exercise 2 with reps/weight"],
-  "intermediate": ["exercise 1", "exercise 2"],
-  "beginner": ["exercise 1", "exercise 2"],
-  "notes": "any extra info in Swedish"
-}
-Today is ${new Date().toISOString().slice(0,10)}.
-IMPORTANT rules:
-1. Convert ALL imperial to metric: lb→kg (divide by 2.205, round to nearest 2.5), feet→m, miles→km, yards→m, inches→cm
-2. If workout is AMRAP: set type="amrap" and amrap_minutes to the number of minutes. Each exercise gets "(X reps)" format. The user will log total rounds completed as reps.
-3. If workout is "For time": type="fortime"
-4. If strength/lifting: type="strength"
-5. Translate description and notes to Swedish
-6. Include reps AND weight in each exercise string, e.g. "21 Knäböj (70 kg)" or "400m Löpning"`
-          }]
-        })
-      });
-      const data = await response.json();
-      const text = data.content.filter(b => b.type === "text").map(b => b.text).join("");
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("Kunde inte tolka WOD");
-      const parsed = JSON.parse(jsonMatch[0]);
-      setWod(parsed);
+      const today = new Date().toISOString().slice(0,10);
+      const dateCode = today.replace(/-/g,"").slice(2); // e.g. "260605"
+
+      // Fetch today's specific WOD page via CORS proxy
+      const url = `https://www.crossfit.com/${dateCode}`;
+      const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error("Kunde inte nå CrossFit");
+      const html = await res.text();
+
+      // Parse the HTML
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      // Get main content text
+      const body = doc.body?.innerText || doc.body?.textContent || "";
+
+      // Extract title (first h1 or h2)
+      const h1 = doc.querySelector("h1, h2")?.textContent?.trim() || `WOD ${today}`;
+
+      // Extract workout content - look for the main workout section
+      const lines = body.split("\n").map(l => l.trim()).filter(l => l.length > 2);
+
+      // Find workout description - lines after title until "Stimulus"
+      let descLines = [];
+      let rxExercises = [];
+      let inWorkout = false;
+      let type = "other";
+      let amrapMinutes = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.includes("Rest Day")) {
+          type = "rest";
+          descLines = ["Vilodag 😴"];
+          break;
+        }
+        if (/AMRAP|as many rounds/i.test(line)) { type = "amrap"; inWorkout = true; }
+        if (/for time/i.test(line)) { type = "fortime"; inWorkout = true; }
+        if (/rounds for time/i.test(line)) { type = "fortime"; inWorkout = true; }
+        if (/\d+.*minut/i.test(line) && type === "amrap") {
+          const m = line.match(/(\d+)/);
+          if (m) amrapMinutes = parseInt(m[1]);
+        }
+        if (/squat|press|pull|run|row|deadlift|snatch|clean|jerk|burpee|swing|carry|bike|climb|jump|sit.up|push/i.test(line)) {
+          inWorkout = true;
+          // Convert units
+          let ex = line
+            .replace(/(\d+(?:\.\d+)?)\s*lb/gi, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
+            .replace(/(\d+(?:\.\d+)?)\s*feet/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
+            .replace(/(\d+(?:\.\d+)?)\s*foot/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
+            .replace(/(\d+(?:\.\d+)?)\s*miles?/gi, (_, n) => `${(Number(n)*1.609).toFixed(1)} km`)
+            .replace(/(\d+(?:\.\d+)?)\s*yards?/gi, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
+          rxExercises.push(ex);
+        }
+        if (inWorkout && descLines.length < 3 && line.length > 10) descLines.push(line);
+        if (/Stimulus|Strategy|Intermediate option|Beginner option/i.test(line)) break;
+      }
+
+      if (rxExercises.length === 0) throw new Error("Kunde inte hitta övningar för idag");
+
+      const wod = {
+        date: today,
+        title: h1.replace(/^\d+\s*/, ""),
+        description: descLines.slice(0,2).join(" ").slice(0,200),
+        type,
+        amrap_minutes: amrapMinutes,
+        rx: rxExercises.slice(0, 10),
+        intermediate: [],
+        beginner: [],
+        notes: ""
+      };
+
+      setWod(wod);
     } catch(e) {
-      setError("Kunde inte hämta dagens WOD. Försök igen!");
+      console.error(e);
+      setError("Kunde inte hämta WOD: " + e.message);
     }
     setLoading(false);
   }
