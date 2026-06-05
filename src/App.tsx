@@ -31,18 +31,35 @@ async function loadPrograms() {
 }
 
 async function savePrograms(data) {
-  // First try to update existing row
-  const existing = await sbFetch("programs?id=eq.00000000-0000-0000-0000-000000000001");
-  if (existing && existing.length > 0) {
-    await sbFetch("programs?id=eq.00000000-0000-0000-0000-000000000001", {
+  try {
+    // Try PATCH first (update existing)
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/programs?id=eq.00000000-0000-0000-0000-000000000001`, {
       method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+      },
       body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
     });
-  } else {
-    await sbFetch("programs", {
-      method: "POST",
-      body: JSON.stringify({ id: "00000000-0000-0000-0000-000000000001", data, updated_at: new Date().toISOString() }),
-    });
+    const patchData = patchRes.ok ? await patchRes.json() : [];
+    // If nothing was updated, insert new row
+    if (!patchData || patchData.length === 0) {
+      await fetch(`${SUPABASE_URL}/rest/v1/programs`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation",
+        },
+        body: JSON.stringify({ id: "00000000-0000-0000-0000-000000000001", data, updated_at: new Date().toISOString() }),
+      });
+    }
+  } catch(e) {
+    console.error("Save programs error:", e);
+    throw e;
   }
 }
 
@@ -806,7 +823,7 @@ export default function TraningApp() {
 
   return (
     <div style={{ minHeight:"100vh", width:"100%", background:"#080c10", color:"#d0e4f0", fontFamily:"'DM Sans','Segoe UI',sans-serif", display:"flex", flexDirection:"column", boxSizing:"border-box" }}>
-      <style>{`html,body{background:#080c10!important;margin:0!important;padding:0!important;width:100%;overflow-x:hidden}`}</style>
+      <style>{`html,body{background:#080c10!important;margin:0!important;padding:0!important;width:100%;overflow-x:hidden}*{box-sizing:border-box}`}</style>
       <div style={{ padding:"16px 20px 12px", background:"linear-gradient(180deg,#0d1520,#080c10)", borderBottom:"1px solid #1a2a3a" }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
