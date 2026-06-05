@@ -462,8 +462,63 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
   );
 }
 
+// ── Log Day Group ──
+function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const groupRef = useRef(null);
+  const exercises = [...new Set(entries.map(e=>e.exercise))];
+
+  useEffect(() => {
+    if (highlighted && groupRef.current) {
+      groupRef.current.scrollIntoView({ behavior:"smooth", block:"start" });
+    }
+  }, [highlighted]);
+
+  return (
+    <div ref={groupRef} style={{ background:"#0d1117", border:`1px solid ${highlighted ? BLUE : "#1a2a3a"}`, borderRadius:16, marginBottom:12, overflow:"hidden", boxShadow: highlighted ? `0 0 12px ${BLUE}44` : "none" }}>
+      {/* Day header */}
+      <div style={{ padding:"12px 16px", background:"linear-gradient(90deg,#101820,#0d1117)", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <div style={{ cursor:"pointer", flex:1 }} onClick={() => setExpanded(v=>!v)}>
+          <div style={{ fontSize:13, fontWeight:800, color:BLUE }}>{date}</div>
+          <div style={{ fontSize:11, color:"#4488aa", marginTop:2 }}>{exercises.join(", ")} · {entries.length} set</div>
+        </div>
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <button onClick={() => setExpanded(v=>!v)} style={{ background:"none", border:"none", color:"#4488aa", cursor:"pointer", fontSize:16 }}>{expanded ? "▲" : "▼"}</button>
+          {!confirmDelete ? (
+            <button onClick={() => setConfirmDelete(true)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:700, fontSize:12 }}>🗑 Radera pass</button>
+          ) : (
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={() => { onDeleteDay(entries); setConfirmDelete(false); }} style={{ background:"#ff4466", border:"none", color:"#fff", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:800, fontSize:12 }}>✓ Ja, radera</button>
+              <button onClick={() => setConfirmDelete(false)} style={{ background:"#1a2a3a", border:"none", color:"#aaa", borderRadius:8, padding:"6px 12px", cursor:"pointer", fontWeight:700, fontSize:12 }}>Avbryt</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Entries */}
+      {expanded && (
+        <div style={{ padding:"8px 12px", display:"flex", flexDirection:"column", gap:6 }}>
+          {entries.map(entry => (
+            <div key={entry.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 10px", background:"#0a0e14", borderRadius:10 }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:14, color:"#c0d8f0" }}>{entry.exercise}</div>
+                <div style={{ fontSize:12, color:"#446688", marginTop:2 }}>
+                  {entry.sets&&`${entry.sets} set`}{entry.reps&&` × ${entry.reps} reps`}
+                  {entry.weight&&<span style={{ color:BLUE, marginLeft:8, fontWeight:700 }}>{entry.weight} kg</span>}
+                </div>
+              </div>
+              <button onClick={() => onDeleteEntry(entry.id)} style={{ background:"none", border:"none", color:"#334455", cursor:"pointer", fontSize:16, padding:"4px 8px" }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Stats Tab ──
-function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBodyWeight }) {
+function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBodyWeight, onDateClick }) {
   const [statsView, setStatsView] = useState("overview"); // overview | exercise | bodyweight | calendar
   const [selectedExercise, setSelectedExercise] = useState("");
   const [bwForm, setBwForm] = useState({ date: new Date().toISOString().slice(0,10), weight: "" });
@@ -567,11 +622,24 @@ function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBody
         </div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
           {days.map(({ ds, day, worked }) => (
-            <div key={ds} style={{ aspectRatio:"1", borderRadius:6, background: worked ? BLUE : "#111820", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:worked?800:400, color:worked?"#fff":"#334455" }}>
+            <div key={ds}
+              onClick={() => worked && onDateClick && onDateClick(ds)}
+              style={{
+                aspectRatio:"1", borderRadius:6,
+                background: worked ? BLUE : "#111820",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:11, fontWeight:worked?800:400,
+                color:worked?"#fff":"#334455",
+                cursor: worked ? "pointer" : "default",
+                border: worked ? `2px solid ${BLUE_DARK}` : "2px solid transparent",
+                transition:"transform 0.1s",
+              }}
+            >
               {day}
             </div>
           ))}
         </div>
+        {onDateClick && <div style={{ fontSize:11, color:"#334455", marginTop:8, textAlign:"center" }}>Tryck på en träningsdag för att se passet</div>}
       </div>
     );
   }
@@ -745,6 +813,7 @@ export default function TraningApp() {
   const [logForm, setLogForm] = useState({ date:new Date().toISOString().slice(0,10), exercise:"", sets:"", reps:"", weight:"" });
   const [restDuration, setRestDuration] = useState(60);
   const [activeDay, setActiveDay] = useState(null);
+  const [selectedLogDate, setSelectedLogDate] = useState(null);
   const [passActive, setPassActive] = useState(false);
   const wakeLockRef = useRef(null);
 
@@ -1060,21 +1129,22 @@ export default function TraningApp() {
                 ):(
                   <div>
                     <div style={{ fontSize:12, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:10 }}>Historik</div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                      {log.map(entry=>(
-                        <div key={entry.id} style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:14, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                          <div>
-                            <div style={{ fontSize:11, color:"#334455", marginBottom:2 }}>{entry.date}</div>
-                            <div style={{ fontWeight:700, fontSize:15, color:"#c0d8f0" }}>{entry.exercise}</div>
-                            <div style={{ fontSize:13, color:"#446688", marginTop:3 }}>
-                              {entry.sets&&`${entry.sets} set`}{entry.reps&&` × ${entry.reps} reps`}
-                              {entry.weight&&<span style={{ color:BLUE, marginLeft:8, fontWeight:700 }}>{entry.weight} kg</span>}
-                            </div>
-                          </div>
-                          <button onClick={()=>deleteLog(entry.id)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:16 }}>✕</button>
-                        </div>
-                      ))}
-                    </div>
+                    {[...new Set(log.map(e=>e.date))].sort((a,b)=>b.localeCompare(a)).map(date => {
+                      const dayEntries = log.filter(e=>e.date===date);
+                      return (
+                        <LogDayGroup
+                          key={date}
+                          date={date}
+                          entries={dayEntries}
+                          highlighted={date===selectedLogDate}
+                          onDeleteEntry={deleteLog}
+                          onDeleteDay={async (entries) => {
+                            for (const e of entries) await deleteLog(e.id);
+                            if (date===selectedLogDate) setSelectedLogDate(null);
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1083,7 +1153,7 @@ export default function TraningApp() {
         )}
 
         {tab==="stats"&&(
-          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={insertBodyWeight} deleteBodyWeight={deleteBodyWeight}/>
+          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={insertBodyWeight} deleteBodyWeight={deleteBodyWeight} onDateClick={(date) => { setSelectedLogDate(date); setTab("logg"); }}/>
         )}
 
         {tab==="timer"&&(
