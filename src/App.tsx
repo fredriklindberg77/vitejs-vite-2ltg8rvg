@@ -841,87 +841,89 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
     setLoading(true); setError(null); setWod(null); setImported(false);
     try {
       const today = new Date().toISOString().slice(0,10);
-      const dateCode = today.replace(/-/g,"").slice(2); // e.g. "260605"
 
-      // Use Supabase Edge Function as proxy
+      // Fetch via Supabase Edge Function
       const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod`, {
-        headers: {
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-        }
+        headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
       });
-      if (!res.ok) throw new Error("Edge function fel");
-      const html = await res.text();
+      if (!res.ok) throw new Error("Edge function svarade inte");
+      const { text } = await res.json();
+      if (!text) throw new Error("Inget innehåll");
 
-      // Parse the HTML
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
+      // Parse workout from text
+      const lines = text.split(/\s{2,}|\n/).map(l => l.trim()).filter(l => l.length > 3);
 
-      // Get main content text
-      const body = doc.body?.innerText || doc.body?.textContent || "";
-
-      // Extract title (first h1 or h2)
-      const h1 = doc.querySelector("h1, h2")?.textContent?.trim() || `WOD ${today}`;
-
-      // Extract workout content - look for the main workout section
-      const lines = body.split("\n").map(l => l.trim()).filter(l => l.length > 2);
-
-      // Find workout description - lines after title until "Stimulus"
-      let descLines = [];
-      let rxExercises = [];
-      let inWorkout = false;
-      let type = "other";
+      // Detect workout type
+      let type = "fortime";
       let amrapMinutes = null;
+      let title = `WOD ${today}`;
+      let exercises = [];
+      let notes = "";
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.includes("Rest Day")) {
-          type = "rest";
-          descLines = ["Vilodag 😴"];
-          break;
-        }
-        if (/AMRAP|as many rounds/i.test(line)) { type = "amrap"; inWorkout = true; }
-        if (/for time/i.test(line)) { type = "fortime"; inWorkout = true; }
-        if (/rounds for time/i.test(line)) { type = "fortime"; inWorkout = true; }
-        if (/\d+.*minut/i.test(line) && type === "amrap") {
-          const m = line.match(/(\d+)/);
+      for (const line of lines) {
+        if (/AMRAP/i.test(line)) {
+          type = "amrap";
+          const m = line.match(/(\d+)[\s-]*min/i);
           if (m) amrapMinutes = parseInt(m[1]);
         }
-        if (/squat|press|pull|run|row|deadlift|snatch|clean|jerk|burpee|swing|carry|bike|climb|jump|sit.up|push/i.test(line)) {
-          inWorkout = true;
-          // Convert units
-          let ex = line
-            .replace(/(\d+(?:\.\d+)?)\s*lb/gi, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
-            .replace(/(\d+(?:\.\d+)?)\s*feet/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
-            .replace(/(\d+(?:\.\d+)?)\s*foot/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
-            .replace(/(\d+(?:\.\d+)?)\s*miles?/gi, (_, n) => `${(Number(n)*1.609).toFixed(1)} km`)
-            .replace(/(\d+(?:\.\d+)?)\s*yards?/gi, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
-          rxExercises.push(ex);
-        }
-        if (inWorkout && descLines.length < 3 && line.length > 10) descLines.push(line);
-        if (/Stimulus|Strategy|Intermediate option|Beginner option/i.test(line)) break;
+        if (/Rest Day/i.test(line)) { type = "rest"; break; }
       }
 
-      if (rxExercises.length === 0) throw new Error("Kunde inte hitta övningar för idag");
+      // Find workout section - look for numbered reps or exercise patterns
+      const exPattern = /^(\d+[-–]\d+[-–]\d+|\d+)\s+(.{5,60})$/;
+      const weightPattern = /(\d+(?:\.\d+)?)\s*(lb|lbs|pound)/gi;
+      const feetPattern = /(\d+(?:\.\d+)?)\s*(feet|foot|ft|')/gi;
+      const milePattern = /(\d+(?:\.\d+)?)\s*(miles?|mi)\b/gi;
+      const yardPattern = /(\d+(?:\.\d+)?)\s*(yards?|yd)/gi;
 
-      const wod = {
-        date: today,
-        title: h1.replace(/^\d+\s*/, ""),
-        description: descLines.slice(0,2).join(" ").slice(0,200),
-        type,
-        amrap_minutes: amrapMinutes,
-        rx: rxExercises.slice(0, 10),
-        intermediate: [],
-        beginner: [],
-        notes: ""
-      };
+      function convertUnits(s) {
+        return s
+          .replace(weightPattern, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
+          .replace(feetPattern, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
+          .replace(milePattern, (_, n) => `${(Number(n)*1.609).toFixed(2)} km`)
+          .replace(yardPattern, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
+      }
 
-      setWod(wod);
+      // Collect exercise lines
+      let inWorkout = false;
+      for (const line of lines) {
+        const converted = convertUnits(line);
+        if (/for time|rounds for time|complete the following/i.test(line)) { inWorkout = true; continue; }
+        if (inWorkout && /stimulus|strategy|scaling|intermediate option|beginner option|score/i.test(line)) break;
+        if (inWorkout && converted.length > 5 && converted.length < 80) {
+          exercises.push(converted);
+          if (exercises.length >= 8) break;
+        }
+        // Also grab lines that look like exercises even without "for time"
+        if (!inWorkout && exPattern.test(line) && exercises.length < 8) {
+          exercises.push(convertUnits(line));
+        }
+      }
+
+      // If no exercises found, grab any lines with numbers + action words
+      if (exercises.length === 0) {
+        for (const line of lines) {
+          if (/\d+.*(rope|pull|row|run|dead|squat|press|snatch|clean|jerk|burpee|swing|carry|bike|climb|jump|sit.up|push|lunge|thruster|box)/i.test(line)) {
+            exercises.push(convertUnits(line));
+            if (exercises.length >= 6) break;
+          }
+        }
+      }
+
+      if (exercises.length === 0) throw new Error("Kunde inte hitta övningar – försök igen om en stund");
+
+      // Try to find title
+      const titleLine = lines.find(l => /^\d{6}$/.test(l) || /workout of the day/i.test(l));
+      if (titleLine) title = titleLine;
+
+      setWod({ date: today, title, description: exercises.slice(0,2).join(" | "), type, amrap_minutes: amrapMinutes, rx: exercises, intermediate: [], beginner: [], notes });
     } catch(e) {
       console.error(e);
       setError("Kunde inte hämta WOD: " + e.message);
     }
     setLoading(false);
   }
+
 
   function importAsProgram() {
     if (!wod) return;
