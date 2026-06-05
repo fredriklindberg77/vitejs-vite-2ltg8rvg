@@ -834,7 +834,7 @@ export default function TraningApp() {
         ))}
       </div>
 
-      <div style={{ flex:1, padding:"20px 20px 100px", overflowY:"auto" }}>
+      <div style={{ flex:1, padding:"20px 16px 100px", overflowY:"auto", width:"100%", boxSizing:"border-box" }}>
 
         {tab==="program"&&(
           <div>
