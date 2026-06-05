@@ -468,8 +468,11 @@ function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted })
   const [expanded, setExpanded] = useState(!!highlighted);
   const groupRef = useRef(null);
 
-  // Group entries by exercise
-  const byExercise = entries.reduce((acc, e) => {
+  // Sort entries oldest first within the day
+  const sortedEntries = [...entries].reverse();
+
+  // Group entries by exercise, preserving order of first appearance
+  const byExercise = sortedEntries.reduce((acc, e) => {
     if (!acc[e.exercise]) acc[e.exercise] = [];
     acc[e.exercise].push(e);
     return acc;
