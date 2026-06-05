@@ -891,7 +891,7 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
           .filter(Boolean);
 
         // Better: find lines with numbers + exercise names
-        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+(?:\.\d+)?(?:\s*[-–]\s*\d+)?)\s+([A-Za-z][A-Za-z\s\-()]{4,50})/g;
+        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+[-–]\d+|\d+(?:\.\d+)?)\s+([A-Za-z][A-Za-z\s\-()']{4,60}(?:climbs?|carries?|shuttles?|deadlifts?|bike|row|run|press|squat|pull[-\s]?up|burpee|swing|carry|jump|sit[-\s]?up|push[-\s]?up|lunge|thruster|snatch|clean|jerk|toes|knees|double|calorie|cal\b)[A-Za-z\s\-()']{0,30})/gi;
         let match;
         const found = new Set();
         while ((match = exercisePattern.exec(workoutText)) !== null) {
