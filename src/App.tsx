@@ -841,7 +841,6 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
     setLoading(true); setError(null); setWod(null); setImported(false);
     try {
       const today = new Date().toISOString().slice(0,10);
-
       const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod`, {
         headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
       });
@@ -851,92 +850,95 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
 
       function convertUnits(s) {
         return s
-          .replace(/(\d+(?:\.\d+)?)\s*(lb|lbs|pounds?)/gi, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
+          .replace(/(\d+(?:\.\d+)?)\s*(lb|lbs|pounds?)\b/gi, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
           .replace(/(\d+(?:\.\d+)?)\s*(feet|foot|ft)\b/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
           .replace(/(\d+(?:\.\d+)?)\s*miles?\b/gi, (_, n) => `${(Number(n)*1.609).toFixed(2)} km`)
           .replace(/(\d+(?:\.\d+)?)\s*(yards?|yd)\b/gi, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
       }
 
-      // Find the workout section - it starts after "For time:" or "AMRAP" etc
-      // and ends before "Stimulus" or "Post time"
-      let type = "fortime";
-      let amrapMinutes = null;
-      let title = `WOD ${today}`;
-      let rx = [], intermediate = [], beginner = [];
+      // Find today's workout block in the page
+      const dateCode = today.replace(/-/g,"").slice(2);
+      const todayIdx = text.indexOf(dateCode);
+      if (todayIdx === -1) throw new Error("Hittade inte dagens pass");
 
-      // Extract the core workout block
-      // Pattern: find "For time:" section with exercises
-      const wodMatch = text.match(/For time[:\s]+([\s\S]{20,800})(?:Stimulus|Post time|Intermediate option)/i);
-      const amrapMatch = text.match(/(\d+)[-\s]minute AMRAP[:\s]+([\s\S]{20,500})(?:Stimulus|Post time|Intermediate option)/i);
-      const strengthMatch = text.match(/([A-Z][^.]+(?:sets|reps|max|1RM)[^.]{10,200})/i);
+      // Slice to next day block
+      const nextDayMatch = text.slice(todayIdx + 10).search(/\d{6}/);
+      const wodBlock = nextDayMatch > 0
+        ? text.slice(todayIdx, todayIdx + 10 + nextDayMatch)
+        : text.slice(todayIdx, todayIdx + 5000);
 
-      let workoutText = "";
-      if (amrapMatch) {
+      // Rest day check
+      if (/Rest Day/i.test(wodBlock)) {
+        setWod({ date: today, title: "Vilodag 😴", description: "Återhämtning", type: "rest", amrap_minutes: null, rounds: null, rx: ["Aktiv återhämtning eller vila"], intermediate: [], beginner: [], notes: "" });
+        setLoading(false); return;
+      }
+
+      // Detect type
+      let type = "other", amrapMinutes = null, rounds = null, title = `WOD ${today}`;
+      if (/complete as many rounds|complete as many reps/i.test(wodBlock)) {
         type = "amrap";
-        amrapMinutes = parseInt(amrapMatch[1]);
-        workoutText = amrapMatch[2];
-      } else if (wodMatch) {
+        const m = wodBlock.match(/(\d+)\s*[-–]?\s*minutes?\s+of:|in\s+(\d+)\s+minutes?/i);
+        if (m) amrapMinutes = parseInt(m[1]||m[2]);
+      } else if (/for time/i.test(wodBlock)) {
         type = "fortime";
-        workoutText = wodMatch[1];
-      } else {
-        // Fallback: look for rep schemes
-        const repMatch = text.match(/(\d+[-–]\d+[-–]\d+[^.]{5,60})/g);
-        if (repMatch) workoutText = repMatch.join(" | ");
+      } else if (/(\d+)\s+rounds?\s+for\s+time/i.test(wodBlock)) {
+        type = "fortime";
+        const m = wodBlock.match(/(\d+)\s+rounds?/i);
+        if (m) rounds = parseInt(m[1]);
+      } else if (/for load|sets for load|sets? of:/i.test(wodBlock)) {
+        type = "strength";
       }
 
-      // Parse exercises from workout text
-      if (workoutText) {
-        const exLines = workoutText
-          .split(/(?:\d+\s+calorie|\d+[-–]\d+|\d+\s+(?:rope|pull|row|dead|squat|press|farmer|dumbbell|kettlebell|box|burpee|run|bike|climb|jump|sit|push|lunge|thruster|hang|snatch|clean|jerk|toes|knees|double))/i)
-          .filter(Boolean);
-
-        // Better: find lines with numbers + exercise names
-        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+[-–]\d+|\d+(?:\.\d+)?)\s+([A-Za-z][A-Za-z\s\-()']{4,60}(?:climbs?|carries?|shuttles?|deadlifts?|bike|row|run|press|squat|pull[-\s]?up|burpee|swing|carry|jump|sit[-\s]?up|push[-\s]?up|lunge|thruster|snatch|clean|jerk|toes|knees|double|calorie|cal\b)[A-Za-z\s\-()']{0,30})/gi;
-        let match;
-        const found = new Set();
-        while ((match = exercisePattern.exec(workoutText)) !== null) {
-          const ex = convertUnits(`${match[1]} ${match[2].trim()}`);
-          if (!found.has(ex) && ex.length < 80) {
-            found.add(ex);
-            rx.push(ex);
-          }
-          if (rx.length >= 8) break;
-        }
+      // Extract exercise lines from a block of text
+      function extractLines(block) {
+        return block.split("\n")
+          .map(l => l.replace(/^[\*#>\s]+/, "").trim())
+          .filter(l => {
+            if (l.length < 4 || l.length > 150) return false;
+            if (/^[♀♂\[\(]/.test(l)) return false;
+            if (/stimulus|strategy|intermediate option|beginner option|resources|post time|post rounds|post loads|compare to|find a gym|one shuttle|partition|switch arms|no rest/i.test(l)) return false;
+            if (/^https?:|^\./.test(l)) return false;
+            // Must contain a number followed by letters (exercise pattern)
+            return /\d+/.test(l) && /[a-zA-Z]{3}/.test(l);
+          })
+          .map(convertUnits)
+          .slice(0, 12);
       }
 
-      // Extract intermediate option
-      const intMatch = text.match(/Intermediate option[:\s]+For time[:\s]+([\s\S]{20,500})(?:Beginner option|Stimulus|Post time)/i);
-      if (intMatch) {
-        let match;
-        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+)\s+([A-Za-z][A-Za-z\s\-()]{4,50})/g;
-        while ((match = exercisePattern.exec(intMatch[1])) !== null) {
-          intermediate.push(convertUnits(`${match[1]} ${match[2].trim()}`));
-          if (intermediate.length >= 8) break;
-        }
+      // Split into RX / Intermediate / Beginner sections
+      const intIdx = wodBlock.indexOf("**Intermediate option**");
+      const begIdx = wodBlock.indexOf("**Beginner option**");
+      const stimIdx = wodBlock.search(/\*\*Stimulus|Post time|Post rounds|Post loads/i);
+
+      const rxEnd = intIdx > 0 ? intIdx : (stimIdx > 0 ? stimIdx : wodBlock.length);
+      const intEnd = begIdx > 0 ? begIdx : (stimIdx > 0 ? stimIdx : wodBlock.length);
+
+      const rxBlock = wodBlock.slice(0, rxEnd);
+      const intBlock = intIdx > 0 ? wodBlock.slice(intIdx, intEnd) : "";
+      const begBlock = begIdx > 0 ? wodBlock.slice(begIdx, stimIdx > 0 ? stimIdx : begIdx + 1000) : "";
+
+      const rx = extractLines(rxBlock);
+      const intermediate = intBlock ? extractLines(intBlock) : [];
+      const beginner = begBlock ? extractLines(begBlock) : [];
+
+      // Named workout
+      const namedMatch = wodBlock.match(/\*\*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\*\*/);
+      if (namedMatch && !["For","Complete","Push","Back","Rest","Stimulus","Intermediate","Beginner","Find","Post","One","Switch","No"].includes(namedMatch[1])) {
+        title = namedMatch[1];
       }
 
-      // Extract beginner option
-      const begMatch = text.match(/Beginner option[:\s]+For time[:\s]+([\s\S]{20,500})(?:Stimulus|Post time|Resources|$)/i);
-      if (begMatch) {
-        let match;
-        const exercisePattern = /(\d+[-–]\d+[-–]\d+|\d+)\s+([A-Za-z][A-Za-z\s\-()]{4,50})/g;
-        while ((match = exercisePattern.exec(begMatch[1])) !== null) {
-          beginner.push(convertUnits(`${match[1]} ${match[2].trim()}`));
-          if (beginner.length >= 8) break;
-        }
-      }
+      // Notes (weights)
+      const notesLines = rxBlock.match(/[♀♂][^\n]{0,80}/g) || [];
+      const notes = notesLines.map(convertUnits).join(" | ");
 
-      if (rx.length === 0) throw new Error("Kunde inte tolka övningarna – CrossFit kan ha ändrat sin layout");
+      let desc = type === "amrap" ? `AMRAP ${amrapMinutes} min` :
+                 type === "fortime" && rounds ? `${rounds} rundor for time` :
+                 type === "fortime" ? "For Time" :
+                 type === "strength" ? "Styrka" : "WOD";
 
-      // Extract title
-      const titleMatch = text.match(/Workout of the Day\s+(\d+)/i);
-      if (titleMatch) title = `260${titleMatch[1]}`;
+      if (rx.length === 0) throw new Error("Hittade inga övningar");
 
-      // Notes - weights
-      const notesMatch = text.match(/[♀♂]\s*\d+[-–]\d+[^\n.]{0,60}/g);
-      const notes = notesMatch ? notesMatch.slice(0,2).join(" | ").replace(/[♀♂]/g, m => m === "♀" ? "Kvinna" : "Man") : "";
-
-      setWod({ date: today, title, description: `${type === "amrap" ? `AMRAP ${amrapMinutes} min` : "For Time"}`, type, amrap_minutes: amrapMinutes, rx, intermediate, beginner, notes });
+      setWod({ date: today, title, description: desc, type, amrap_minutes: amrapMinutes, rounds, rx, intermediate, beginner, notes });
     } catch(e) {
       console.error(e);
       setError("Kunde inte hämta WOD: " + e.message);
@@ -944,22 +946,57 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
     setLoading(false);
   }
 
-
-  function importAsProgram() {
+    function importAsProgram() {
     if (!wod) return;
-    const exercises = (level === "rx" ? wod.rx : level === "intermediate" ? wod.intermediate : wod.beginner) || wod.rx || [];
+    const exercises = (level === "rx" ? wod.rx : level === "intermediate" ? wod.intermediate : wod.beginner);
+    const useExercises = (exercises && exercises.length > 0) ? exercises : wod.rx || [];
     const isAmrap = wod.type === "amrap";
+
+    let days = [];
+
+    if (isAmrap) {
+      // Single day for AMRAP
+      days = [{
+        id: uid(), day: "Dag 1", focus: `AMRAP ${wod.amrap_minutes} min`,
+        exercises: useExercises.map(ex => ({ name: ex, rest: 60 }))
+      }];
+    } else {
+      // Check if exercises have rep schemes like "6-4-2" or "21-15-9"
+      // Split into rounds if so
+      const hasRounds = useExercises.some(ex => /\d+[-–]\d+[-–]\d+/.test(ex));
+
+      if (hasRounds) {
+        // Parse rounds - e.g. "6-4-2 Rope climbs" → Round 1: 6, Round 2: 4, Round 3: 2
+        const rounds = [[], [], []];
+        useExercises.forEach(ex => {
+          const m = ex.match(/(\d+)[-–](\d+)[-–](\d+)\s+(.+)/);
+          if (m) {
+            rounds[0].push({ name: `${m[1]} ${m[4].trim()}`, rest: 60 });
+            rounds[1].push({ name: `${m[2]} ${m[4].trim()}`, rest: 60 });
+            rounds[2].push({ name: `${m[3]} ${m[4].trim()}`, rest: 60 });
+          } else {
+            // No round scheme, add to all rounds
+            rounds[0].push({ name: ex, rest: 60 });
+            rounds[1].push({ name: ex, rest: 60 });
+            rounds[2].push({ name: ex, rest: 60 });
+          }
+        });
+        days = rounds.map((exs, i) => ({
+          id: uid(), day: `Dag ${i+1}`, focus: `Runda ${i+1}`,
+          exercises: exs
+        }));
+      } else {
+        days = [{
+          id: uid(), day: "Dag 1", focus: wod.title || "CrossFit WOD",
+          exercises: useExercises.map(ex => ({ name: ex, rest: 60 }))
+        }];
+      }
+    }
+
     const newProgram = {
       id: uid(),
       name: `CrossFit WOD ${wod.date || new Date().toISOString().slice(0,10)}`,
-      days: [{
-        id: uid(),
-        day: "Dag 1",
-        focus: wod.title || "CrossFit WOD",
-        exercises: isAmrap
-          ? [{ name: `AMRAP ${wod.amrap_minutes} min: ${exercises.join(" / ")}`, rest: 60 }]
-          : exercises.map(ex => ({ name: ex, rest: 60 }))
-      }]
+      days
     };
     setPrograms(prev => [newProgram, ...prev]);
     setSelectedProgramId(newProgram.id);
