@@ -968,126 +968,14 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
   async function fetchWOD() {
     setLoading(true); setError(null); setWod(null); setImported(false);
     try {
-      const today = new Date().toISOString().slice(0,10);
       const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod`, {
         headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
       });
       if (!res.ok) throw new Error("Edge function svarade inte");
-      const { text } = await res.json();
-      if (!text) throw new Error("Inget innehåll");
-
-      function convertUnits(s) {
-        return s
-          .replace(/(\d+(?:\.\d+)?)\s*(lb|lbs|pounds?)\b/gi, (_, n) => `${Math.round(Number(n)/2.205/2.5)*2.5} kg`)
-          .replace(/(\d+(?:\.\d+)?)\s*(feet|foot|ft)\b/gi, (_, n) => `${(Number(n)*0.3048).toFixed(1)} m`)
-          .replace(/(\d+(?:\.\d+)?)\s*miles?\b/gi, (_, n) => `${(Number(n)*1.609).toFixed(2)} km`)
-          .replace(/(\d+(?:\.\d+)?)\s*(yards?|yd)\b/gi, (_, n) => `${Math.round(Number(n)*0.9144)} m`);
-      }
-
-      // Find workout section - try multiple patterns
-      let wodStart = text.indexOf("Workout of the Day");
-      if (wodStart === -1) wodStart = text.indexOf("For time:");
-      if (wodStart === -1) wodStart = text.indexOf("For time");
-      if (wodStart === -1) wodStart = text.indexOf("AMRAP");
-      if (wodStart === -1) throw new Error("Hittade inte WOD-sektionen");
-      // Skip forward past "Workout of the Day" header to actual content
-      const contentStart = text.indexOf("For time", wodStart);
-      const amrapIdx = text.indexOf("AMRAP", wodStart);
-      const strengthIdx = text.indexOf("For load", wodStart);
-      if (contentStart > 0 && contentStart < wodStart + 500) wodStart = contentStart;
-      else if (amrapIdx > 0 && amrapIdx < wodStart + 500) wodStart = amrapIdx;
-      else if (strengthIdx > 0 && strengthIdx < wodStart + 500) wodStart = strengthIdx;
-
-      // Find end markers
-      const stimStart = text.indexOf("**Stimulus and Strategy", wodStart);
-      // Search case-insensitive for section headers with various formats
-      function findSection(haystack, needle, from=0) {
-        const lower = haystack.toLowerCase();
-        const idx = lower.indexOf(needle.toLowerCase(), from);
-        return idx;
-      }
-      const intStart = findSection(text, "intermediate option", wodStart);
-      const begStart = findSection(text, "beginner option", wodStart);
-      const resStart = findSection(text, "resources:", wodStart);
-
-      // RX block: from after "Workout of the Day" to Stimulus or Intermediate
-      const rxEnd = stimStart > 0 ? stimStart : (intStart > 0 ? intStart : wodStart + 2000);
-      const rxBlock = text.slice(wodStart, rxEnd);
-
-      // Intermediate block
-      const intEnd = begStart > 0 ? begStart : (resStart > 0 ? resStart : 0);
-      const intBlock = intStart > 0 ? text.slice(intStart, intEnd > intStart ? intEnd : intStart + 1500) : "";
-
-      // Beginner block
-      const begEnd = resStart > 0 ? resStart : 0;
-      const begBlock = begStart > 0 ? text.slice(begStart, begEnd > begStart ? begEnd : begStart + 1500) : "";
-
-      // Detect type
-      let type = "other", amrapMinutes = null, rounds = null, title = `WOD ${today}`;
-      if (/complete as many rounds|complete as many reps/i.test(rxBlock)) {
-        type = "amrap";
-        const m = rxBlock.match(/(\d+)\s*[-–]?\s*minutes?\s+(?:of:|AMRAP)|AMRAP[:\s]+(\d+)/i);
-        if (m) amrapMinutes = parseInt(m[1]||m[2]);
-      } else if (/for time/i.test(rxBlock)) {
-        type = "fortime";
-      } else if (/(\d+)\s+rounds?\s+for\s+time/i.test(rxBlock)) {
-        type = "fortime";
-        const m = rxBlock.match(/(\d+)\s+rounds?/i);
-        if (m) rounds = parseInt(m[1]);
-      } else if (/for load|sets of/i.test(rxBlock)) {
-        type = "strength";
-      }
-
-      // Extract exercises from a text block
-      function extractExercises(block) {
-        // Strip bold markers first so "**4** rope climbs" becomes "4 rope climbs"
-        block = block.replace(/\*\*([^*]+)\*\*/g, "$1");
-        // First try splitting on newlines
-        let lines = block.split("\n").map(l => l.trim()).filter(Boolean);
-        
-        // If we only get a few long lines, the text is compressed - split on exercise patterns
-        const isCompressed = lines.length < 5 && block.length > 100;
-        if (isCompressed) {
-          // Split on patterns like "21 " before exercise names or number sequences
-          lines = block
-            .replace(/(\d+[-–]?\s+(?:rope|dumbbell|pull|calorie|cal\b|farmers|deadlift|bike|row|run|box|burpee|squat|press|snatch|clean|jerk|toes|knees|barbell|kettlebell|jump|sit|push))/gi, "\n$1")
-            .split("\n")
-            .map(l => l.trim())
-            .filter(Boolean);
-        }
-
-        const result = [];
-        for (const line of lines) {
-          if (/^#+\s|^\[|^http|^\*\*|^One shuttle|^Post time|^Post rounds|^♀|^♂|^Compare|^Find a gym/i.test(line)) continue;
-          if (/certificate course|open a crossfit|what is crossfit|find a gym|workout of the day|stimulus|strategy|intermediate option|beginner option|resources|shop rogue|subscribe/i.test(line)) continue;
-          if (/^\d/.test(line) && /[a-zA-Z]{3}/.test(line) && line.length < 120) {
-            result.push(convertUnits(line.replace(/\.$/, "").trim()));
-          }
-          if (result.length >= 15) break;
-        }
-        return result;
-      }
-
-      const rx = extractExercises(rxBlock);
-      const intermediate = extractExercises(intBlock);
-      const beginner = extractExercises(begBlock);
-
-      // Notes - weight lines from all blocks
-      const allNotesLines = (text.slice(wodStart, resStart > 0 ? resStart : wodStart + 5000).match(/[♀♂][^\n]{0,60}/g) || []);
-      const notes = [...new Set(allNotesLines)].map(convertUnits).join(" | ");
-
-      // Named workout detection
-      const namedMatch = rxBlock.match(/^##\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*$/m);
-      if (namedMatch) title = namedMatch[1];
-
-      let desc = type === "amrap" ? `AMRAP ${amrapMinutes} min` :
-                 type === "fortime" && rounds ? `${rounds} rundor for time` :
-                 type === "fortime" ? "For Time" :
-                 type === "strength" ? "Styrka" : "WOD";
-
-      if (rx.length === 0) throw new Error("Hittade inga övningar – försök igen");
-
-      setWod({ date: today, title, description: desc, type, amrap_minutes: amrapMinutes, rounds, rx, intermediate, beginner, notes });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (!data.rx || data.rx.length === 0) throw new Error("Inga övningar hittades");
+      setWod(data);
     } catch(e) {
       console.error(e);
       setError("Kunde inte hämta WOD: " + e.message);
@@ -1095,8 +983,7 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
     setLoading(false);
   }
 
-
-  function importAsProgram() {
+    function importAsProgram() {
     if (!wod) return;
     const exercises = (level === "rx" ? wod.rx : level === "intermediate" ? wod.intermediate : wod.beginner);
     const useExercises = (exercises && exercises.length > 0) ? exercises : wod.rx || [];
@@ -1510,7 +1397,7 @@ export default function TraningApp() {
                     </div>
                   )}
                   <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                    {!editMode&&<button onClick={()=>startWorkout(d)} style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:10, padding:"7px 14px", cursor:"pointer", fontWeight:800, fontSize:13 }}>▶ Kör</button>}
+                    {!editMode&&<button onClick={()=>startWorkout(d, /crossfit wod/i.test(selectedProgram?.name))} style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:10, padding:"7px 14px", cursor:"pointer", fontWeight:800, fontSize:13 }}>▶ Kör</button>}
                     {editMode&&<button onClick={()=>deleteDay(selectedProgram.id,d.id)} style={smallBtn("#1a0a0a","#ff4466")}>🗑</button>}
                   </div>
                 </div>
