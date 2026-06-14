@@ -185,18 +185,21 @@ const RestTimer = ({ restDuration, setRestDuration, timerRef: externalRef }) => 
   );
 };
 
-function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
+function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpdateSets, defaultSets=3, currentSessionId }) {
   const prevSets = (() => {
-    const entries = log.filter(e => e.exercise.toLowerCase()===exName.toLowerCase());
+    // Exclude sets from current session
+    const entries = log.filter(e => 
+      e.exercise.toLowerCase()===exName.toLowerCase() && 
+      e.sessionId !== currentSessionId
+    );
     if (!entries.length) return [];
-    // Find latest date
     const dates = [...new Set(entries.map(e => e.date))].sort((a,b) => b.localeCompare(a));
     const latestDate = dates[0];
-    // Get all sets from that date, sorted oldest first (reverse of desc order)
     return [...entries.filter(e => e.date===latestDate)].reverse();
   })();
   const makeSet = (i) => ({ id:uid(), reps:prevSets[i]?.reps||"10", weight:prevSets[i]?.weight||"", done:false });
-  const [sets, setSets] = useState([makeSet(0),makeSet(1),makeSet(2)]);
+  const initCount = Math.max(prevSets.length || 0, defaultSets);
+  const [sets, setSets] = useState(() => Array.from({length: initCount}, (_,i) => makeSet(i)));
   const [showPrev, setShowPrev] = useState(true);
 
   function updateSet(id,field,val) { setSets(prev=>prev.map(s=>s.id===id?{...s,[field]:val}:s)); }
@@ -212,7 +215,15 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
       onStartRest({ exercise:exName, reps: nextUndone?.reps || set.reps, weight: nextUndone?.weight || set.weight, rest: exRest });
     }
   }
-  function addSet() { const last=sets[sets.length-1]; setSets(prev=>[...prev,{id:uid(),reps:last?.reps||"10",weight:last?.weight||"",done:false}]); }
+  function addSet() {
+    const last=sets[sets.length-1];
+    const newSet = {id:uid(),reps:last?.reps||"10",weight:last?.weight||"",done:false};
+    setSets(prev=>{
+      const updated = [...prev, newSet];
+      if (onUpdateSets) onUpdateSets(updated.length);
+      return updated;
+    });
+  }
   function removeSet(id) { if (sets.length<=1) return; setSets(prev=>prev.filter(s=>s.id!==id)); }
 
   const doneCount=sets.filter(s=>s.done).length;
@@ -411,7 +422,7 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
   );
 }
 
-function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod }) {
+function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId }) {
   const [showRestPopup, setShowRestPopup] = useState(false);
   const [nextSet, setNextSet] = useState(null);
   const [exercises, setExercises] = useState(day.exercises.map(e => ({ ...e, uid: uid() })));
@@ -497,7 +508,10 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
                 <button onClick={() => moveDown(idx)} style={{ background:"#111820", border:"none", color:"#4488aa", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>↓</button>
                 <button onClick={() => removeExercise(idx)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>✕</button>
               </div>
-              <ExerciseCard exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest}/>
+              <ExerciseCard exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest} defaultSets={ex.defaultSets||3} currentSessionId={currentSessionId} onUpdateSets={(newCount) => {
+                setExercises(prev => prev.map((e,i) => i===idx ? {...e, defaultSets: newCount} : e));
+                if (onUpdateProgram) onUpdateProgram(idx, newCount);
+              }}/>
             </div>
           ))}
           {showAddEx ? (
@@ -1089,6 +1103,7 @@ export default function TraningApp() {
   const [activeIsWod, setActiveIsWod] = useState(false);
   const [selectedLogDate, setSelectedLogDate] = useState(null);
   const [passActive, setPassActive] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const wakeLockRef = useRef(null);
 
   // Keep screen on during workout
@@ -1197,15 +1212,23 @@ export default function TraningApp() {
     return()=>clearInterval(intervalRef.current);
   }, [intervalRunning, intervals, intervalPhase]);
 
-  function startWorkout(day, isWod=false) { setActiveDay(day); setActiveIsWod(isWod); setPassActive(true); setPassSeconds(0); setTab("logg"); }
-  function finishWorkout() { setActiveDay(null); setPassActive(false); setPassSeconds(0); }
+  function startWorkout(day, isWod=false) { 
+    setActiveDay(day); 
+    setActiveIsWod(isWod); 
+    setPassActive(true); 
+    setPassSeconds(0); 
+    setCurrentSessionId(uid());
+    setTab("logg"); 
+  }
+  function finishWorkout() { setActiveDay(null); setPassActive(false); setPassSeconds(0); setCurrentSessionId(null); }
 
   async function handleLogSet(entry) {
+    const taggedEntry = { ...entry, sessionId: currentSessionId };
     try {
-      const saved = await insertLog(entry);
-      setLog(prev=>[saved||{...entry,id:uid()},...prev]);
+      const saved = await insertLog(taggedEntry);
+      setLog(prev=>[saved||{...taggedEntry,id:uid()},...prev]);
     } catch(e) {
-      setLog(prev=>[{...entry,id:uid()},...prev]);
+      setLog(prev=>[{...taggedEntry,id:uid()},...prev]);
     }
   }
 
@@ -1383,7 +1406,13 @@ export default function TraningApp() {
         {tab==="logg"&&(
           <div>
             {activeDay?(
-              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod}/>
+              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} onUpdateProgram={(exIdx, newSetCount) => {
+                setPrograms(prev => prev.map(p => p.id === selectedProgramId ? {
+                  ...p, days: p.days.map(d => d.id === activeDay.id ? {
+                    ...d, exercises: d.exercises.map((e,i) => i === exIdx ? {...e, defaultSets: newSetCount} : e)
+                  } : d)
+                } : p));
+              }}/>
             ):(
               <div>
                 <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:18, padding:20, marginBottom:16 }}>
