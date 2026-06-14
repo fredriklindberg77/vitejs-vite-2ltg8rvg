@@ -195,6 +195,7 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
   })();
   const makeSet = (i) => ({ id:uid(), reps:prevSets[i]?.reps||"10", weight:prevSets[i]?.weight||"", done:false });
   const [sets, setSets] = useState([makeSet(0),makeSet(1),makeSet(2)]);
+  const [showPrev, setShowPrev] = useState(true);
 
   function updateSet(id,field,val) { setSets(prev=>prev.map(s=>s.id===id?{...s,[field]:val}:s)); }
   function toggleDone(id) {
@@ -204,7 +205,6 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
     setSets(prev=>prev.map(s=>s.id===id?{...s,done:newDone}:s));
     if (newDone) {
       onLogSet({ exercise:exName, sets:"1", reps:set.reps, weight:set.weight, date:new Date().toISOString().slice(0,10) });
-      // find next undone set
       const currentIdx = sets.findIndex(s => s.id === id);
       const nextUndone = sets.slice(currentIdx + 1).find(s => !s.done);
       onStartRest({ exercise:exName, reps: nextUndone?.reps || set.reps, weight: nextUndone?.weight || set.weight, rest: exRest });
@@ -221,14 +221,39 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
           <div style={{ width:28, height:28, borderRadius:8, background:BLUE_DIM, color:BLUE, fontWeight:900, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{exIdx+1}</div>
           <div>
             <div style={{ fontWeight:700, fontSize:15, color:"#c0d8f0" }}>{exName}</div>
-            {prevSets.length>0 && <div style={{ fontSize:11, color:"#3a6888", marginTop:1 }}>Förra: <span style={{ color:"#70aad0" }}>{prevSets.map(s=>`${s.weight}kg×${s.reps}`).join(", ")}</span></div>}
             {prevSets.length===0 && <div style={{ fontSize:11, color:"#2a4455" }}>Ingen tidigare data</div>}
+            {prevSets.length>0 && (
+              <div onClick={()=>setShowPrev(v=>!v)} style={{ fontSize:11, color:"#3a6888", marginTop:1, cursor:"pointer" }}>
+                Förra: <span style={{ color:"#70aad0" }}>{prevSets.map(s=>`${s.weight}kg×${s.reps}`).join(", ")}</span>
+                <span style={{ color:"#334455", marginLeft:6 }}>{showPrev?"▲":"▼"}</span>
+              </div>
+            )}
           </div>
         </div>
         <div style={{ background:doneCount===sets.length&&sets.length>0?"#0a2010":BLUE_DIM, color:doneCount===sets.length&&sets.length>0?"#50e090":BLUE, borderRadius:20, padding:"3px 10px", fontSize:12, fontWeight:700 }}>
           {doneCount}/{sets.length} set
         </div>
       </div>
+
+      {/* Previous session full breakdown */}
+      {prevSets.length>0 && showPrev && (
+        <div style={{ padding:"8px 14px", background:"#080c10", borderBottom:"1px solid #1a2a3a" }}>
+          <div style={{ fontSize:10, color:"#3a5566", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>Föregående pass</div>
+          <div style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr", gap:4 }}>
+            <div style={{ fontSize:10, color:"#2a4455" }}>#</div>
+            <div style={{ fontSize:10, color:"#2a4455", textAlign:"center" }}>REPS</div>
+            <div style={{ fontSize:10, color:"#2a4455", textAlign:"center" }}>KG</div>
+            {prevSets.map((s,i) => (
+              <React.Fragment key={i}>
+                <div style={{ fontSize:12, color:"#334455", display:"flex", alignItems:"center" }}>{i+1}</div>
+                <div style={{ fontSize:13, fontWeight:700, color:"#6090b0", textAlign:"center", padding:"3px 0" }}>{s.reps}</div>
+                <div style={{ fontSize:13, fontWeight:700, color:BLUE, textAlign:"center", padding:"3px 0" }}>{s.weight}</div>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ display:"grid", gridTemplateColumns:"32px 1fr 1fr 1fr 36px", gap:6, padding:"8px 14px 4px", alignItems:"center" }}>
         <div/><div style={{ fontSize:10, color:"#334455", letterSpacing:1, textAlign:"center" }}>SET</div>
         <div style={{ fontSize:10, color:"#334455", letterSpacing:1, textAlign:"center" }}>REPS</div>
@@ -251,6 +276,8 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
     </div>
   );
 }
+
+
 
 function playBeep() {
   try {
