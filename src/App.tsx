@@ -1135,7 +1135,7 @@ function HomeTab({ log, programs, selectedProgramId, setTab, setSelectedProgramI
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       {/* Logo */}
       <div style={{ display:"flex", justifyContent:"center", alignItems:"center", padding:"24px 0 8px" }}>
-        <img src={LOGO_SRC} alt="FLX Performance" style={{ height:90, objectFit:"contain" }}/>
+        <img src={LOGO_SRC} alt="FLX Performance" style={{ height:180, objectFit:"contain" }}/>
       </div>
 
       {/* Active program */}
