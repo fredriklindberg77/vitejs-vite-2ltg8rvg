@@ -189,9 +189,11 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
   const prevSets = (() => {
     const entries = log.filter(e => e.exercise.toLowerCase()===exName.toLowerCase());
     if (!entries.length) return [];
-    entries.sort((a,b) => new Date(b.date)-new Date(a.date));
-    const latestDate = entries[0].date;
-    return entries.filter(e => e.date===latestDate);
+    // Find latest date
+    const dates = [...new Set(entries.map(e => e.date))].sort((a,b) => b.localeCompare(a));
+    const latestDate = dates[0];
+    // Get all sets from that date, sorted oldest first (reverse of desc order)
+    return [...entries.filter(e => e.date===latestDate)].reverse();
   })();
   const makeSet = (i) => ({ id:uid(), reps:prevSets[i]?.reps||"10", weight:prevSets[i]?.weight||"", done:false });
   const [sets, setSets] = useState([makeSet(0),makeSet(1),makeSet(2)]);
