@@ -444,7 +444,13 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
   function logWodResult() {
     if (!wodResult) return;
     const isAmrap = /amrap/i.test(day.focus);
-    onLogSet({ exercise: day.focus || "WOD", sets: "1", reps: isAmrap ? wodResult : "1", weight: wodWeight || "", date: new Date().toISOString().slice(0,10) });
+    onLogSet({ 
+      exercise: day.focus || "WOD", 
+      sets: "1", 
+      reps: isAmrap ? wodResult : wodResult,  // rundor för AMRAP, tid för for time
+      weight: wodWeight || "—", 
+      date: new Date().toISOString().slice(0,10) 
+    });
     setWodLogged(true);
   }
 
@@ -587,22 +593,30 @@ function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted })
           {exercises.map(ex => (
             <div key={ex} style={{ marginBottom:12 }}>
               <div style={{ fontSize:13, fontWeight:800, color:"#c0d8f0", marginBottom:6, paddingBottom:4, borderBottom:"1px solid #1a2a3a" }}>{ex}</div>
-              <div style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr 1fr 28px", gap:4, marginBottom:4 }}>
-                <div style={{ fontSize:10, color:"#334455" }}></div>
-                <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>SET</div>
-                <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>REPS</div>
-                <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>KG</div>
-                <div></div>
-              </div>
-              {byExercise[ex].map((entry, i) => (
-                <div key={entry.id} style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr 1fr 28px", gap:4, marginBottom:4, alignItems:"center" }}>
-                  <div style={{ width:22, height:22, borderRadius:6, background:BLUE_DIM, color:BLUE, fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>{i+1}</div>
-                  <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, color:"#556677" }}>{i+1}</div>
-                  <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, fontWeight:700, color:"#c0d8f0" }}>{entry.reps||"—"}</div>
-                  <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, fontWeight:700, color:BLUE }}>{entry.weight ? `${entry.weight}` : "—"}</div>
-                  <button onClick={(e) => { e.stopPropagation(); onDeleteEntry(entry.id); }} style={{ background:"none", border:"none", color:"#334455", cursor:"pointer", fontSize:14, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
-                </div>
-              ))}
+              {(() => {
+                const isWodEx = byExercise[ex].length === 1 && (byExercise[ex][0].reps?.includes(":") || byExercise[ex][0].reps?.includes("+") || /^\d+$/.test(byExercise[ex][0].sets||"1") && byExercise[ex][0].sets==="1");
+                const repLabel = byExercise[ex][0]?.reps?.includes(":") ? "TID" : byExercise[ex][0]?.reps?.length > 5 ? "RUNDOR" : "REPS";
+                return (
+                  <>
+                    <div style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr 1fr 28px", gap:4, marginBottom:4 }}>
+                      <div style={{ fontSize:10, color:"#334455" }}></div>
+                      <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>SET</div>
+                      <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>{repLabel}</div>
+                      <div style={{ fontSize:10, color:"#334455", textAlign:"center" }}>KG</div>
+                      <div></div>
+                    </div>
+                    {byExercise[ex].map((entry, i) => (
+                      <div key={entry.id} style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr 1fr 28px", gap:4, marginBottom:4, alignItems:"center" }}>
+                        <div style={{ width:22, height:22, borderRadius:6, background:BLUE_DIM, color:BLUE, fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>{i+1}</div>
+                        <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, color:"#556677" }}>{i+1}</div>
+                        <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, fontWeight:700, color:"#c0d8f0" }}>{entry.reps||"—"}</div>
+                        <div style={{ background:"#0a0e14", borderRadius:6, padding:"6px 0", textAlign:"center", fontSize:13, fontWeight:700, color:BLUE }}>{entry.weight && entry.weight !== "—" ? `${entry.weight} kg` : entry.weight||"—"}</div>
+                        <button onClick={(e) => { e.stopPropagation(); onDeleteEntry(entry.id); }} style={{ background:"none", border:"none", color:"#334455", cursor:"pointer", fontSize:14, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
             </div>
           ))}
 
