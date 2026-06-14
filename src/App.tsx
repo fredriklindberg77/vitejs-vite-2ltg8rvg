@@ -938,7 +938,8 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
       if (!res.ok) throw new Error("Edge function svarade inte");
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      if (!data.rx || data.rx.length === 0) throw new Error("Inga övningar hittades");
+      if (!data.rx) data.rx = ["Ingen övningsinformation tillgänglig"];
+      if (data.rx.length === 0) data.rx = ["Ingen övningsinformation tillgänglig"];
       setWod(data);
     } catch(e) {
       console.error(e);
