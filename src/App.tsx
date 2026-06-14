@@ -244,11 +244,11 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest }) {
             <div style={{ fontSize:10, color:"#2a4455", textAlign:"center" }}>REPS</div>
             <div style={{ fontSize:10, color:"#2a4455", textAlign:"center" }}>KG</div>
             {prevSets.map((s,i) => (
-              <React.Fragment key={i}>
+              <div key={i} style={{ display:"contents" }}>
                 <div style={{ fontSize:12, color:"#334455", display:"flex", alignItems:"center" }}>{i+1}</div>
                 <div style={{ fontSize:13, fontWeight:700, color:"#6090b0", textAlign:"center", padding:"3px 0" }}>{s.reps}</div>
                 <div style={{ fontSize:13, fontWeight:700, color:BLUE, textAlign:"center", padding:"3px 0" }}>{s.weight}</div>
-              </React.Fragment>
+              </div>
             ))}
           </div>
         </div>
