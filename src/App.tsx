@@ -1110,8 +1110,105 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
   );
 }
 
+// ── Home Tab ──
+function HomeTab({ log, programs, selectedProgramId, setTab, setSelectedProgramId, startWorkout }) {
+  const selectedProgram = programs.find(p => p.id === selectedProgramId);
+
+  // Latest session
+  const dates = [...new Set(log.map(e => e.date))].sort((a,b) => b.localeCompare(a));
+  const latestDate = dates[0];
+  const latestSession = latestDate ? log.filter(e => e.date === latestDate) : [];
+  const latestExercises = [...new Set(latestSession.map(e => e.exercise))];
+
+  // Personal records per exercise
+  const prs = {};
+  log.forEach(e => {
+    const w = Number(e.weight);
+    if (!w) return;
+    if (!prs[e.exercise] || w > prs[e.exercise].weight) {
+      prs[e.exercise] = { weight: w, reps: e.reps, date: e.date };
+    }
+  });
+  const prList = Object.entries(prs).sort((a,b) => b[1].weight - a[1].weight).slice(0, 5);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {/* Logo */}
+      <div style={{ display:"flex", justifyContent:"center", alignItems:"center", padding:"24px 0 8px" }}>
+        <img src={LOGO_SRC} alt="FLX Performance" style={{ height:90, objectFit:"contain" }}/>
+      </div>
+
+      {/* Active program */}
+      <div style={{ background:"linear-gradient(135deg,#0a1828,#0a0e14)", border:`1px solid ${BLUE_DARK}`, borderRadius:16, padding:"16px 18px" }}>
+        <div style={{ fontSize:10, color:BLUE, letterSpacing:3, textTransform:"uppercase", marginBottom:10 }}>📋 Aktivt program</div>
+        {selectedProgram ? (
+          <div>
+            <div style={{ fontSize:18, fontWeight:800, color:"#fff", marginBottom:10 }}>{selectedProgram.name}</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {selectedProgram.days.map(d => (
+                <div key={d.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0a0e14", borderRadius:10, padding:"10px 14px" }}>
+                  <div>
+                    <div style={{ fontSize:12, fontWeight:700, color:BLUE }}>{d.day}</div>
+                    <div style={{ fontSize:11, color:"#4488aa", marginTop:2 }}>{d.focus || d.exercises.map(e=>e.name||e).join(", ").slice(0,50)}</div>
+                  </div>
+                  <button onClick={() => startWorkout(d, /crossfit wod/i.test(selectedProgram.name))}
+                    style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:8, padding:"7px 14px", cursor:"pointer", fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>▶ Kör</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setTab("program")} style={{ width:"100%", marginTop:10, padding:"9px", borderRadius:10, background:"none", border:`1px solid ${BLUE_DARK}`, color:BLUE, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              Byt program →
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setTab("program")} style={{ width:"100%", padding:"12px", borderRadius:10, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+            + Skapa program
+          </button>
+        )}
+      </div>
+
+      {/* Latest session */}
+      {latestDate && (
+        <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px" }}>
+          <div style={{ fontSize:10, color:"#50e090", letterSpacing:3, textTransform:"uppercase", marginBottom:10 }}>📝 Senaste pass – {latestDate}</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+            {latestExercises.map(ex => (
+              <div key={ex} style={{ background:"#0a1a14", border:"1px solid #1a3a24", borderRadius:8, padding:"4px 10px", fontSize:12, color:"#50e090", fontWeight:700 }}>{ex}</div>
+            ))}
+          </div>
+          <div style={{ fontSize:11, color:"#334455" }}>{latestSession.length} set · {latestExercises.length} övningar</div>
+          <button onClick={() => setTab("logg")} style={{ width:"100%", marginTop:10, padding:"9px", borderRadius:10, background:"none", border:"1px solid #1a3a24", color:"#50e090", fontWeight:700, fontSize:13, cursor:"pointer" }}>
+            Se historik →
+          </button>
+        </div>
+      )}
+
+      {/* PRs */}
+      {prList.length > 0 && (
+        <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px" }}>
+          <div style={{ fontSize:10, color:"#ffaa00", letterSpacing:3, textTransform:"uppercase", marginBottom:10 }}>🏆 Personliga rekord</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {prList.map(([ex, pr]) => (
+              <div key={ex} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0a0e14", borderRadius:10, padding:"10px 14px" }}>
+                <div style={{ fontSize:13, color:"#c0d8f0", fontWeight:700 }}>{ex}</div>
+                <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+                  <div style={{ fontSize:18, fontWeight:900, color:BLUE }}>{pr.weight} <span style={{ fontSize:11, color:"#4488aa" }}>kg</span></div>
+                  <div style={{ fontSize:12, color:"#334455" }}>×{pr.reps}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setTab("stats")} style={{ width:"100%", marginTop:10, padding:"9px", borderRadius:10, background:"none", border:`1px solid #2a2010`, color:"#ffaa00", fontWeight:700, fontSize:13, cursor:"pointer" }}>
+            Se all statistik →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TraningApp() {
-  const [tab, setTab] = useState("program");
+  const [tab, setTab] = useState("home");
   const [programs, setPrograms] = useState(DEFAULT_PROGRAMS);
   const [selectedProgramId, setSelectedProgramId] = useState(DEFAULT_PROGRAMS[0].id);
   const [editMode, setEditMode] = useState(false);
@@ -1292,7 +1389,7 @@ export default function TraningApp() {
   function resetInterval(){setIntervalRunning(false);setIntervalPhase("work");setIntervalRound(1);setIntervalTime(intervals.work);}
 
   const selectedProgram=programs.find(p=>p.id===selectedProgramId)||programs[0];
-  const tabs=[{id:"program",label:"Program",icon:"📋"},{id:"logg",label:"Loggbok",icon:"📝"},{id:"stats",label:"Statistik",icon:"📊"},{id:"wod",label:"WOD",icon:"🏋️"},{id:"timer",label:"Timer",icon:"⏱"}];
+  const tabs=[{id:"home",label:"Hem",icon:"🏠"},{id:"program",label:"Program",icon:"📋"},{id:"logg",label:"Loggbok",icon:"📝"},{id:"stats",label:"Statistik",icon:"📊"},{id:"wod",label:"WOD",icon:"🏋️"},{id:"timer",label:"Timer",icon:"⏱"}];
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#080c10", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
@@ -1332,6 +1429,17 @@ export default function TraningApp() {
       </div>
 
       <div style={{ flex:1, padding:"20px 16px 100px", overflowY:"auto", width:"100%", boxSizing:"border-box" }}>
+
+        {tab==="home"&&(
+          <HomeTab
+            log={log}
+            programs={programs}
+            selectedProgramId={selectedProgramId}
+            setTab={setTab}
+            setSelectedProgramId={setSelectedProgramId}
+            startWorkout={startWorkout}
+          />
+        )}
 
         {tab==="program"&&(
           <div>
