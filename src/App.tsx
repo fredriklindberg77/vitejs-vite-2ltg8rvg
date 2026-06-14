@@ -911,13 +911,14 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [imported, setImported] = useState(false);
-  const [level, setLevel] = useState("rx"); // rx | intermediate | beginner
-  const today = new Date().toISOString().slice(0,10).replace(/-/g,"").slice(2);
+  const [level, setLevel] = useState("rx");
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0,10));
 
-  async function fetchWOD() {
+  async function fetchWOD(dateStr) {
+    const date = dateStr || selectedDate;
     setLoading(true); setError(null); setWod(null); setImported(false);
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/fetch-wod?date=${date}`, {
         headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
       });
       if (!res.ok) throw new Error("Edge function svarade inte");
@@ -1003,9 +1004,17 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
             <div style={{ fontSize:11, color:"#4488aa" }}>Workout of the Day</div>
           </div>
         </div>
-        <button onClick={fetchWOD} disabled={loading} style={{ width:"100%", padding:"12px", borderRadius:12, background: loading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color: loading ? "#4488aa" : "#fff", fontWeight:800, fontSize:14, border:"none", cursor: loading ? "default" : "pointer" }}>
-          {loading ? "⏳ Hämtar dagens WOD…" : "🔄 Hämta dagens WOD"}
+        <button onClick={() => fetchWOD()} disabled={loading} style={{ width:"100%", padding:"12px", borderRadius:12, background: loading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color: loading ? "#4488aa" : "#fff", fontWeight:800, fontSize:14, border:"none", cursor: loading ? "default" : "pointer" }}>
+          {loading ? "⏳ Hämtar WOD…" : "🔄 Hämta WOD"}
         </button>
+        {/* Date picker */}
+        <div style={{ display:"flex", gap:8, marginTop:10, alignItems:"center" }}>
+          <input type="date" value={selectedDate} max={new Date().toISOString().slice(0,10)}
+            onChange={e => setSelectedDate(e.target.value)}
+            style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 14px", color:"#fff", fontSize:14, outline:"none", colorScheme:"dark" }}
+          />
+          <button onClick={() => { setSelectedDate(new Date().toISOString().slice(0,10)); }} style={{ background:"#1a2a3a", border:"none", color:"#4488aa", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontSize:13, fontWeight:700, whiteSpace:"nowrap" }}>Idag</button>
+        </div>
         {error && <div style={{ color:"#ff4466", fontSize:13, marginTop:8, textAlign:"center" }}>{error}</div>}
       </div>
 
