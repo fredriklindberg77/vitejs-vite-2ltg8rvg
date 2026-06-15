@@ -236,9 +236,8 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
             <div style={{ fontWeight:700, fontSize:15, color:"#c0d8f0" }}>{exName}</div>
             {prevSets.length===0 && <div style={{ fontSize:11, color:"#2a4455" }}>Ingen tidigare data</div>}
             {prevSets.length>0 && (
-              <div onClick={()=>setShowPrev(v=>!v)} style={{ fontSize:11, color:"#3a6888", marginTop:1, cursor:"pointer" }}>
+              <div style={{ fontSize:11, color:"#3a6888", marginTop:1 }}>
                 Förra: <span style={{ color:"#70aad0" }}>{prevSets.map(s=>`${s.weight}kg×${s.reps}`).join(", ")}</span>
-                <span style={{ color:"#334455", marginLeft:6 }}>{showPrev?"▲":"▼"}</span>
               </div>
             )}
           </div>
@@ -247,25 +246,6 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
           {doneCount}/{sets.length} set
         </div>
       </div>
-
-      {/* Previous session full breakdown */}
-      {prevSets.length>0 && showPrev && (
-        <div style={{ padding:"8px 14px", background:"#080c10", borderBottom:"1px solid #1a2a3a" }}>
-          <div style={{ fontSize:10, color:"#3a5566", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>Föregående pass</div>
-          <div style={{ display:"grid", gridTemplateColumns:"28px 1fr 1fr", gap:4 }}>
-            <div style={{ fontSize:10, color:"#2a4455" }}>#</div>
-            <div style={{ fontSize:10, color:"#2a4455", textAlign:"center" }}>REPS</div>
-            <div style={{ fontSize:10, color:"#2a4455", textAlign:"center" }}>KG</div>
-            {prevSets.map((s,i) => (
-              <div key={i} style={{ display:"contents" }}>
-                <div style={{ fontSize:12, color:"#334455", display:"flex", alignItems:"center" }}>{i+1}</div>
-                <div style={{ fontSize:13, fontWeight:700, color:"#6090b0", textAlign:"center", padding:"3px 0" }}>{s.reps}</div>
-                <div style={{ fontSize:13, fontWeight:700, color:BLUE, textAlign:"center", padding:"3px 0" }}>{s.weight}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div style={{ display:"grid", gridTemplateColumns:"32px 1fr 1fr 1fr 36px", gap:6, padding:"8px 14px 4px", alignItems:"center" }}>
         <div/><div style={{ fontSize:10, color:"#334455", letterSpacing:1, textAlign:"center" }}>SET</div>
@@ -326,7 +306,7 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
     if (restRunning) {
       restRef.current = setInterval(() => {
         setRestSeconds(s => {
-          if (s <= 1) { clearInterval(restRef.current); setRestRunning(false); playBeep(); return 0; }
+          if (s <= 1) { clearInterval(restRef.current); setRestRunning(false); playBeep(); setTimeout(() => onClose(), 2000); return 0; }
           return s - 1;
         });
       }, 1000);
@@ -1299,10 +1279,18 @@ export default function TraningApp() {
     }, 1000);
   }, [programs]);
 
+  const passStartTime = useRef(null);
+
   useEffect(() => {
-    if (passActive) { passRef.current = setInterval(()=>setPassSeconds(s=>s+1),1000); }
-    else clearInterval(passRef.current);
-    return ()=>clearInterval(passRef.current);
+    if (passActive) {
+      passStartTime.current = Date.now() - (passSeconds * 1000);
+      passRef.current = setInterval(() => {
+        setPassSeconds(Math.floor((Date.now() - passStartTime.current) / 1000));
+      }, 1000);
+    } else {
+      clearInterval(passRef.current);
+    }
+    return () => clearInterval(passRef.current);
   }, [passActive]);
 
   useEffect(() => {
