@@ -1159,13 +1159,26 @@ function WodTab({ programs, setPrograms, setSelectedProgramId, setTab }) {
 
 // ── Home Tab ──
 function HomeTab({ log, programs, selectedProgramId, setTab, setSelectedProgramId, startWorkout }) {
-  const selectedProgram = programs.find(p => p.id === selectedProgramId);
-
-  // Latest session
+  // Find the program that was actually run last, based on exercise overlap with latest session
   const dates = [...new Set(log.map(e => e.date))].sort((a,b) => b.localeCompare(a));
   const latestDate = dates[0];
   const latestSession = latestDate ? log.filter(e => e.date === latestDate) : [];
   const latestExercises = [...new Set(latestSession.map(e => e.exercise))];
+
+  const lastUsedProgram = (() => {
+    if (latestExercises.length === 0) return null;
+    let best = null, bestScore = 0;
+    for (const p of programs) {
+      for (const d of p.days) {
+        const dayExNames = d.exercises.map(e => (e.name||e).toLowerCase());
+        const score = latestExercises.filter(ex => dayExNames.includes(ex.toLowerCase())).length;
+        if (score > bestScore) { bestScore = score; best = p; }
+      }
+    }
+    return best;
+  })();
+
+  const selectedProgram = lastUsedProgram || programs.find(p => p.id === selectedProgramId) || programs[0];
 
   // Personal records per exercise
   const prs = {};
@@ -1198,7 +1211,7 @@ function HomeTab({ log, programs, selectedProgramId, setTab, setSelectedProgramI
                     <div style={{ fontSize:12, fontWeight:700, color:BLUE }}>{d.day}</div>
                     <div style={{ fontSize:11, color:"#4488aa", marginTop:2 }}>{d.focus || d.exercises.map(e=>e.name||e).join(", ").slice(0,50)}</div>
                   </div>
-                  <button onClick={() => startWorkout(d, /crossfit wod/i.test(selectedProgram.name))}
+                  <button onClick={() => { setSelectedProgramId(selectedProgram.id); startWorkout(d, /crossfit wod/i.test(selectedProgram.name)); }}
                     style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:8, padding:"7px 14px", cursor:"pointer", fontWeight:800, fontSize:13, whiteSpace:"nowrap" }}>▶ Kör</button>
                 </div>
               ))}
