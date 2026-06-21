@@ -4,12 +4,78 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAi
 const SUPABASE_URL = "https://gajniuyvzntimumhdawj.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdham5pdXl2em50aW11bWhkYXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMDUzNzgsImV4cCI6MjA5NTU4MTM3OH0.SjfV5SB5OrmcvJt9OP6Ui5S3UQawr-FXRMRd6wQfpxw";
 
-// ── Supabase helpers ──
+// ── Auth helpers ──
+async function signUp(email, password) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.msg || "Registrering misslyckades");
+  return data;
+}
+
+async function signIn(email, password) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.msg || "Inloggning misslyckades");
+  return data;
+}
+
+async function refreshSession(refreshToken) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: { "apikey": SUPABASE_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function getProfile(accessToken) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=*`, {
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows?.[0] || null;
+}
+
+async function getAllProfiles(accessToken) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=*&order=created_at.asc`, {
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+function saveSession(session) {
+  localStorage.setItem("flx_session", JSON.stringify(session));
+}
+function loadSession() {
+  try {
+    const raw = localStorage.getItem("flx_session");
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+function clearSession() {
+  localStorage.removeItem("flx_session");
+}
+
+
+let currentAccessToken = null;
+function setAccessToken(token) { currentAccessToken = token; }
+
 async function sbFetch(path, options={}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
       "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
       "Content-Type": "application/json",
       "Prefer": "return=representation",
       ...options.headers,
@@ -24,37 +90,36 @@ async function sbFetch(path, options={}) {
   return res.json();
 }
 
-async function loadPrograms() {
-  const rows = await sbFetch("programs?order=updated_at.desc&limit=1");
+async function loadPrograms(userId, viewUserId) {
+  const targetUser = viewUserId || userId;
+  const rows = await sbFetch(`programs?user_id=eq.${targetUser}&order=updated_at.desc&limit=1`);
   if (rows && rows.length > 0) return rows[0].data;
   return null;
 }
 
-async function savePrograms(data) {
+async function savePrograms(data, userId) {
   try {
-    // Try PATCH first (update existing)
-    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/programs?id=eq.00000000-0000-0000-0000-000000000001`, {
+    const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/programs?user_id=eq.${userId}`, {
       method: "PATCH",
       headers: {
         "apikey": SUPABASE_KEY,
-        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
         "Content-Type": "application/json",
         "Prefer": "return=representation",
       },
       body: JSON.stringify({ data, updated_at: new Date().toISOString() }),
     });
     const patchData = patchRes.ok ? await patchRes.json() : [];
-    // If nothing was updated, insert new row
     if (!patchData || patchData.length === 0) {
       await fetch(`${SUPABASE_URL}/rest/v1/programs`, {
         method: "POST",
         headers: {
           "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
           "Content-Type": "application/json",
           "Prefer": "return=representation",
         },
-        body: JSON.stringify({ id: "00000000-0000-0000-0000-000000000001", data, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ id: uid(), user_id: userId, data, updated_at: new Date().toISOString() }),
       });
     }
   } catch(e) {
@@ -63,15 +128,16 @@ async function savePrograms(data) {
   }
 }
 
-async function loadLog() {
-  const rows = await sbFetch("workout_log?order=created_at.desc&limit=500");
+async function loadLog(userId, viewUserId) {
+  const targetUser = viewUserId || userId;
+  const rows = await sbFetch(`workout_log?user_id=eq.${targetUser}&order=created_at.desc&limit=500`);
   return rows || [];
 }
 
-async function insertLog(entry) {
+async function insertLog(entry, userId) {
   const rows = await sbFetch("workout_log", {
     method: "POST",
-    body: JSON.stringify({ exercise: entry.exercise, sets: entry.sets, reps: entry.reps, weight: entry.weight, date: entry.date }),
+    body: JSON.stringify({ exercise: entry.exercise, sets: entry.sets, reps: entry.reps, weight: entry.weight, date: entry.date, session_id: entry.sessionId, user_id: userId }),
   });
   return rows ? rows[0] : null;
 }
@@ -80,14 +146,15 @@ async function deleteLogEntry(id) {
   await sbFetch(`workout_log?id=eq.${id}`, { method: "DELETE" });
 }
 
-async function loadBodyWeight() {
-  const rows = await sbFetch("body_weight?order=date.desc&limit=365");
+async function loadBodyWeight(userId, viewUserId) {
+  const targetUser = viewUserId || userId;
+  const rows = await sbFetch(`body_weight?user_id=eq.${targetUser}&order=date.desc&limit=365`);
   return rows || [];
 }
-async function insertBodyWeight(entry) {
+async function insertBodyWeight(entry, userId) {
   const rows = await sbFetch("body_weight", {
     method: "POST",
-    body: JSON.stringify({ weight: entry.weight, date: entry.date }),
+    body: JSON.stringify({ weight: entry.weight, date: entry.date, user_id: userId }),
   });
   return rows ? rows[0] : null;
 }
@@ -1187,7 +1254,83 @@ function HomeTab({ log, programs, selectedProgramId, setTab, setSelectedProgramI
   );
 }
 
-export default function TraningApp() {
+// ── Login Screen ──
+function LoginScreen({ onLogin }) {
+  const [mode, setMode] = useState("login"); // login | signup
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [signupSuccess, setSignupSuccess] = useState(false);
+
+  async function handleSubmit() {
+    if (!email || !password) { setError("Fyll i email och lösenord"); return; }
+    setLoading(true); setError("");
+    try {
+      if (mode === "signup") {
+        await signUp(email, password);
+        setSignupSuccess(true);
+      } else {
+        const session = await signIn(email, password);
+        onLogin(session);
+      }
+    } catch(e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  }
+
+  if (signupSuccess) {
+    return (
+      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", padding:20 }}>
+        <div style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:20, padding:"32px 28px", maxWidth:380, width:"100%", textAlign:"center" }}>
+          <img src={LOGO_SRC} alt="FLX" style={{ height:60, marginBottom:20 }}/>
+          <div style={{ fontSize:40, marginBottom:10 }}>✓</div>
+          <div style={{ color:"#50e090", fontWeight:800, fontSize:16, marginBottom:8 }}>Konto skapat!</div>
+          <div style={{ color:"#4488aa", fontSize:13, marginBottom:20 }}>Kontrollera din mail för att bekräfta kontot, sedan kan du logga in.</div>
+          <button onClick={() => { setSignupSuccess(false); setMode("login"); }} style={{ width:"100%", padding:"12px", borderRadius:10, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+            Till inloggning
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", padding:20 }}>
+      <div style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:20, padding:"32px 28px", maxWidth:380, width:"100%" }}>
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:24 }}>
+          <img src={LOGO_SRC} alt="FLX Performance" style={{ height:80 }}/>
+        </div>
+        <div style={{ display:"flex", gap:8, marginBottom:20, background:"#0a0e14", borderRadius:10, padding:4 }}>
+          <button onClick={() => setMode("login")} style={{ flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:700, fontSize:13, background: mode==="login" ? `linear-gradient(135deg,${BLUE},${BLUE_DARK})` : "transparent", color: mode==="login" ? "#fff" : "#4488aa" }}>Logga in</button>
+          <button onClick={() => setMode("signup")} style={{ flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:700, fontSize:13, background: mode==="signup" ? `linear-gradient(135deg,${BLUE},${BLUE_DARK})` : "transparent", color: mode==="signup" ? "#fff" : "#4488aa" }}>Skapa konto</button>
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+            style={{ background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:10, padding:"12px 14px", color:"#fff", fontSize:14, outline:"none" }}/>
+          <input type="password" placeholder="Lösenord" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+            style={{ background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:10, padding:"12px 14px", color:"#fff", fontSize:14, outline:"none" }}/>
+
+          {error && <div style={{ color:"#ff4466", fontSize:13, textAlign:"center" }}>{error}</div>}
+
+          <button onClick={handleSubmit} disabled={loading} style={{ padding:"13px", borderRadius:10, background: loading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:15, cursor: loading ? "default" : "pointer", marginTop:6 }}>
+            {loading ? "⏳ Vänta…" : mode === "login" ? "Logga in" : "Skapa konto"}
+          </button>
+        </div>
+
+        <div style={{ textAlign:"center", marginTop:16, fontSize:11, color:"#334455" }}>
+          Du hålls inloggad automatiskt på denna enhet
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onLogout }) {
+  const userId = session.user.id;
+  const isAdmin = profile?.is_admin;
   const [tab, setTab] = useState("home");
   const [programs, setPrograms] = useState(DEFAULT_PROGRAMS);
   const [selectedProgramId, setSelectedProgramId] = useState(DEFAULT_PROGRAMS[0].id);
@@ -1247,7 +1390,7 @@ export default function TraningApp() {
   useEffect(() => {
     async function loadAll() {
       try {
-        const [savedPrograms, savedLog, savedBW] = await Promise.all([loadPrograms(), loadLog(), loadBodyWeight()]);
+        const [savedPrograms, savedLog, savedBW] = await Promise.all([loadPrograms(userId, viewUserId), loadLog(userId, viewUserId), loadBodyWeight(userId, viewUserId)]);
         if (savedPrograms && savedPrograms.length > 0) setPrograms(savedPrograms);
         if (savedLog) setLog(savedLog);
         if (savedBW) setBodyWeight(savedBW);
@@ -1259,7 +1402,7 @@ export default function TraningApp() {
       }
     }
     loadAll();
-  }, []);
+  }, [viewUserId]);
 
   // ── Auto-save programs when they change ──
   const saveTimer = useRef(null);
@@ -1269,7 +1412,7 @@ export default function TraningApp() {
     setSaveStatus("saving");
     saveTimer.current = setTimeout(async () => {
       try {
-        await savePrograms(programs);
+        await savePrograms(programs, viewUserId || userId);
         setSaveStatus("saved");
         setTimeout(()=>setSaveStatus("idle"), 2000);
       } catch(e) {
@@ -1334,7 +1477,7 @@ export default function TraningApp() {
   async function handleLogSet(entry) {
     const taggedEntry = { ...entry, sessionId: currentSessionId };
     try {
-      const saved = await insertLog(taggedEntry);
+      const saved = await insertLog(taggedEntry, viewUserId || userId);
       setLog(prev=>[saved||{...taggedEntry,id:uid()},...prev]);
     } catch(e) {
       setLog(prev=>[{...taggedEntry,id:uid()},...prev]);
@@ -1395,15 +1538,28 @@ export default function TraningApp() {
             <img src={LOGO_SRC} alt="FLX Performance" style={{ height:46, objectFit:"contain" }}/>
             <SaveBadge status={saveStatus}/>
           </div>
-          {passActive && (
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:10, color:"#3a7aaa", letterSpacing:2, textTransform:"uppercase" }}>Pass pågår</div>
-                <div style={{ fontSize:20, fontWeight:900, color:BLUE, fontVariantNumeric:"tabular-nums" }}>{formatTime(passSeconds)}</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {!passActive && isAdmin && allProfiles.length > 1 && (
+              <select value={viewUserId || userId} onChange={e => setViewUserId(e.target.value === userId ? null : e.target.value)}
+                style={{ background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:8, padding:"6px 10px", color:BLUE, fontSize:12, fontWeight:700, outline:"none" }}>
+                {allProfiles.map(p => (
+                  <option key={p.id} value={p.id}>{p.id === userId ? "Mig" : p.email}</option>
+                ))}
+              </select>
+            )}
+            {!passActive && (
+              <button onClick={onLogout} style={{ background:"none", border:"1px solid #2a3a4a", color:"#4488aa", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Logga ut</button>
+            )}
+            {passActive && (
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:10, color:"#3a7aaa", letterSpacing:2, textTransform:"uppercase" }}>Pass pågår</div>
+                  <div style={{ fontSize:20, fontWeight:900, color:BLUE, fontVariantNumeric:"tabular-nums" }}>{formatTime(passSeconds)}</div>
+                </div>
+                {!activeDay&&<button onClick={finishWorkout} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Avsluta</button>}
               </div>
-              {!activeDay&&<button onClick={finishWorkout} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Avsluta</button>}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -1576,7 +1732,7 @@ export default function TraningApp() {
         )}
 
         {tab==="stats"&&(
-          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={insertBodyWeight} deleteBodyWeight={deleteBodyWeight} onDateClick={(date) => { setSelectedLogDate(date); setTab("logg"); }}/>
+          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={(entry) => insertBodyWeight(entry, viewUserId || userId)} deleteBodyWeight={deleteBodyWeight} onDateClick={(date) => { setSelectedLogDate(date); setTab("logg"); }}/>
         )}
 
         {tab==="wod"&&(
@@ -1649,5 +1805,82 @@ export default function TraningApp() {
         )}
       </div>
     </div>
+  );
+}
+
+// ── Auth Wrapper ──
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [allProfiles, setAllProfiles] = useState([]);
+  const [viewUserId, setViewUserId] = useState(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    async function init() {
+      const saved = loadSession();
+      if (saved?.refresh_token) {
+        const fresh = await refreshSession(saved.refresh_token);
+        if (fresh?.access_token) {
+          setAccessToken(fresh.access_token);
+          saveSession(fresh);
+          setSession(fresh);
+          const p = await getProfile(fresh.access_token);
+          setProfile(p);
+          if (p?.is_admin) {
+            const all = await getAllProfiles(fresh.access_token);
+            setAllProfiles(all);
+          }
+        } else {
+          clearSession();
+        }
+      }
+      setChecking(false);
+    }
+    init();
+  }, []);
+
+  async function handleLogin(newSession) {
+    setAccessToken(newSession.access_token);
+    saveSession(newSession);
+    setSession(newSession);
+    const p = await getProfile(newSession.access_token);
+    setProfile(p);
+    if (p?.is_admin) {
+      const all = await getAllProfiles(newSession.access_token);
+      setAllProfiles(all);
+    }
+  }
+
+  function handleLogout() {
+    clearSession();
+    setAccessToken(null);
+    setSession(null);
+    setProfile(null);
+    setAllProfiles([]);
+    setViewUserId(null);
+  }
+
+  if (checking) {
+    return (
+      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10" }}>
+        <img src={LOGO_SRC} alt="FLX" style={{ height:60, opacity:0.6 }}/>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen onLogin={handleLogin}/>;
+  }
+
+  return (
+    <MainApp
+      session={session}
+      profile={profile}
+      allProfiles={allProfiles}
+      viewUserId={viewUserId}
+      setViewUserId={setViewUserId}
+      onLogout={handleLogout}
+    />
   );
 }
