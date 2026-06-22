@@ -1268,6 +1268,60 @@ function HomeTab({ log, programs, selectedProgramId, setTab, setSelectedProgramI
 }
 
 // ── Login Screen ──
+// ── Upgrade Screen ──
+function UpgradeScreen({ onLogout, demoProgram, onTryDemo }) {
+  const [showDemo, setShowDemo] = useState(false);
+
+  if (showDemo && demoProgram) {
+    return (
+      <div style={{ minHeight:"100vh", background:"#080c10", padding:20 }}>
+        <div style={{ maxWidth:600, margin:"0 auto" }}>
+          <button onClick={() => setShowDemo(false)} style={{ background:"none", border:"none", color:BLUE, fontSize:14, cursor:"pointer", marginBottom:16, padding:0 }}>← Tillbaka</button>
+          <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"20px 22px" }}>
+            <div style={{ fontSize:11, color:"#ffaa00", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>🔒 Demo – skrivskyddat</div>
+            <div style={{ fontSize:20, fontWeight:800, color:"#fff", marginBottom:16 }}>{demoProgram.name}</div>
+            {demoProgram.days.map(d => (
+              <div key={d.id} style={{ background:"#0a0e14", borderRadius:12, padding:"14px 16px", marginBottom:10 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:BLUE, marginBottom:8 }}>{d.day} – {d.focus}</div>
+                {d.exercises.map((ex,i) => (
+                  <div key={i} style={{ fontSize:13, color:"#7098b0", padding:"4px 0" }}>• {ex.name}</div>
+                ))}
+              </div>
+            ))}
+            <button onClick={onTryDemo} style={{ width:"100%", marginTop:10, padding:"12px", borderRadius:10, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+              💎 Uppgradera för full åtkomst
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", padding:20 }}>
+      <div style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:20, padding:"32px 28px", maxWidth:420, width:"100%", textAlign:"center" }}>
+        <img src={LOGO_SRC} alt="FLX" style={{ height:70, marginBottom:20 }}/>
+        <div style={{ fontSize:36, marginBottom:14 }}>⏰</div>
+        <div style={{ fontSize:19, fontWeight:800, color:"#fff", marginBottom:8 }}>Din provperiod har gått ut</div>
+        <div style={{ fontSize:14, color:"#7098b0", marginBottom:24, lineHeight:1.6 }}>
+          Uppgradera för att fortsätta använda FLX Performance fullt ut – program, loggbok, statistik, WOD och mer.
+        </div>
+        <button onClick={onTryDemo} style={{ width:"100%", padding:"14px", borderRadius:12, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", marginBottom:10 }}>
+          💎 Uppgradera nu
+        </button>
+        {demoProgram && (
+          <button onClick={() => setShowDemo(true)} style={{ width:"100%", padding:"12px", borderRadius:12, background:"none", border:"1px solid #1a2a3a", color:"#4488aa", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:10 }}>
+            👀 Se demo-program
+          </button>
+        )}
+        <button onClick={onLogout} style={{ width:"100%", padding:"10px", background:"none", border:"none", color:"#334455", fontSize:13, cursor:"pointer" }}>
+          Logga ut
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState("login"); // login | signup
   const [email, setEmail] = useState("");
@@ -1344,6 +1398,14 @@ function LoginScreen({ onLogin }) {
 function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onLogout }) {
   const userId = session.user.id;
   const isAdmin = profile?.is_admin;
+
+  // Access control: admin always has full access
+  const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
+  const trialActive = trialEndsAt ? trialEndsAt > new Date() : false;
+  const subscriptionActive = profile?.subscription_status === "active";
+  const hasFullAccess = isAdmin || subscriptionActive || trialActive;
+  const daysLeftInTrial = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt - new Date()) / (1000*60*60*24))) : 0;
+
   const [tab, setTab] = useState("home");
   const [programs, setPrograms] = useState(DEFAULT_PROGRAMS);
   const [selectedProgramId, setSelectedProgramId] = useState(DEFAULT_PROGRAMS[0].id);
@@ -1561,6 +1623,11 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
               </select>
             )}
             {!passActive && (
+              {!isAdmin && !subscriptionActive && trialActive && (
+                <div style={{ background:"#1a1408", border:"1px solid #4a3a10", color:"#ffaa00", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700 }}>
+                  {daysLeftInTrial}d kvar i trial
+                </div>
+              )}
               <button onClick={onLogout} style={{ background:"none", border:"1px solid #2a3a4a", color:"#4488aa", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Logga ut</button>
             )}
             {passActive && (
@@ -1884,6 +1951,24 @@ export default function App() {
 
   if (!session) {
     return <LoginScreen onLogin={handleLogin}/>;
+  }
+
+  // Access control check
+  const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
+  const trialActive = trialEndsAt ? trialEndsAt > new Date() : false;
+  const subscriptionActive = profile?.subscription_status === "active";
+  const hasFullAccess = profile?.is_admin || subscriptionActive || trialActive;
+
+  if (!hasFullAccess) {
+    return (
+      <UpgradeScreen
+        onLogout={handleLogout}
+        demoProgram={DEFAULT_PROGRAMS[0]}
+        onTryDemo={() => {
+          window.open("https://buy.stripe.com/YOUR_PAYMENT_LINK", "_blank");
+        }}
+      />
+    );
   }
 
   return (
