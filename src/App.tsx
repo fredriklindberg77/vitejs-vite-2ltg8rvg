@@ -469,7 +469,55 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
   );
 }
 
-function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId }) {
+// ── Exercise Picker (searchable dropdown with add-new) ──
+function ExercisePicker({ value, onChange, onSubmit, existingNames=[], placeholder="Ny övning…" }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  const filtered = value.trim()
+    ? existingNames.filter(n => n.toLowerCase().includes(value.trim().toLowerCase()))
+    : existingNames;
+  const exactMatch = existingNames.some(n => n.toLowerCase() === value.trim().toLowerCase());
+
+  useEffect(() => {
+    function handleClick(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div ref={wrapRef} style={{ position:"relative", flex:1 }}>
+      <input
+        placeholder={placeholder}
+        value={value}
+        onFocus={() => setOpen(true)}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onKeyDown={e => { if (e.key === "Enter") { setOpen(false); onSubmit(); } if (e.key === "Escape") setOpen(false); }}
+        style={{ width:"100%", background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 14px", color:"#d0e4f0", fontSize:14, outline:"none", boxSizing:"border-box" }}
+      />
+      {open && (
+        <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:10, maxHeight:220, overflowY:"auto", zIndex:50, boxShadow:"0 8px 24px rgba(0,0,0,0.4)" }}>
+          {value.trim() && !exactMatch && (
+            <div onClick={() => { onSubmit(); setOpen(false); }} style={{ padding:"10px 14px", cursor:"pointer", color:"#50e090", fontSize:13, fontWeight:700, borderBottom: filtered.length ? "1px solid #1a2a3a" : "none" }}>
+              + Lägg till "{value.trim()}"
+            </div>
+          )}
+          {filtered.length === 0 && !value.trim() && (
+            <div style={{ padding:"10px 14px", color:"#334455", fontSize:13 }}>Inga sparade övningar än</div>
+          )}
+          {filtered.map(name => (
+            <div key={name} onClick={() => { onChange(name); setOpen(false); }} style={{ padding:"10px 14px", cursor:"pointer", color:"#c0d8f0", fontSize:13 }}
+              onMouseDown={e => e.preventDefault()}>
+              {name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId, allExerciseNames=[] }) {
   const [showRestPopup, setShowRestPopup] = useState(false);
   const [nextSet, setNextSet] = useState(null);
   const [exercises, setExercises] = useState(day.exercises.map(e => ({ ...e, uid: uid() })));
@@ -569,8 +617,7 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
           ))}
           {showAddEx ? (
             <div style={{ display:"flex", gap:8, marginTop:8, marginBottom:8 }}>
-              <input placeholder="Ny övning…" value={newExName} onChange={e=>setNewExName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addExercise()}
-                style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 14px", color:"#d0e4f0", fontSize:14, outline:"none" }}/>
+              <ExercisePicker value={newExName} onChange={setNewExName} onSubmit={addExercise} existingNames={allExerciseNames}/>
               <button onClick={addExercise} style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontWeight:800, fontSize:14 }}>+ Lägg till</button>
             </div>
           ) : (
@@ -1415,6 +1462,10 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   const [addingExercise, setAddingExercise] = useState({});
   const [addingRest, setAddingRest] = useState({});
   const [log, setLog] = useState([]);
+  const allExerciseNames = [...new Set([
+    ...programs.flatMap(p => p.days.flatMap(d => d.exercises.map(e => e.name||e))),
+    ...log.map(e => e.exercise),
+  ])].filter(Boolean).sort((a,b) => a.localeCompare(b, "sv"));
   const [bodyWeight, setBodyWeight] = useState([]);
   const [logForm, setLogForm] = useState({ date:new Date().toISOString().slice(0,10), exercise:"", sets:"", reps:"", weight:"" });
   const [restDuration, setRestDuration] = useState(60);
@@ -1738,7 +1789,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
                   {editMode&&(
                     <div style={{ marginTop:8 }}>
                       <div style={{ display:"flex", gap:8, marginBottom:6 }}>
-                        <input placeholder="Ny övning…" value={addingExercise[d.id]||""} onChange={e=>setAddingExercise(prev=>({...prev,[d.id]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addExerciseToDay(selectedProgram.id,d.id)} style={{ ...ghostInput, flex:1, marginBottom:0 }}/>
+                        <ExercisePicker value={addingExercise[d.id]||""} onChange={(v)=>setAddingExercise(prev=>({...prev,[d.id]:v}))} onSubmit={()=>addExerciseToDay(selectedProgram.id,d.id)} existingNames={allExerciseNames}/>
                         <button onClick={()=>addExerciseToDay(selectedProgram.id,d.id)} style={{ ...smallBtn(`linear-gradient(135deg,${BLUE},${BLUE_DARK})`,"#fff"), padding:"7px 14px" }}>+ Lägg till</button>
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:8, paddingLeft:4 }}>
@@ -1762,7 +1813,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
         {tab==="logg"&&(
           <div>
             {activeDay?(
-              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} onUpdateProgram={(exIdx, newSetCount) => {
+              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} allExerciseNames={allExerciseNames} onUpdateProgram={(exIdx, newSetCount) => {
                 setPrograms(prev => prev.map(p => p.id === selectedProgramId ? {
                   ...p, days: p.days.map(d => d.id === activeDay.id ? {
                     ...d, exercises: d.exercises.map((e,i) => i === exIdx ? {...e, defaultSets: newSetCount} : e)
