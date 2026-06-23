@@ -67,6 +67,97 @@ function clearSession() {
   localStorage.removeItem("flx_session");
 }
 
+// ── Storage helpers ──
+async function uploadToStorage(bucket, path, file) {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
+      "Content-Type": file.type,
+    },
+    body: file,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  return path;
+}
+
+async function getSignedUrl(bucket, path) {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${bucket}/${path}`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ expiresIn: 3600 }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.signedURL ? `${SUPABASE_URL}/storage/v1${data.signedURL}` : null;
+}
+
+async function deleteFromStorage(bucket, path) {
+  await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+    method: "DELETE",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
+    },
+  });
+}
+
+// ── Exercise media ──
+async function loadExerciseMedia(exerciseName) {
+  const rows = await sbFetch(`exercise_media?exercise_name=eq.${encodeURIComponent(exerciseName)}&order=created_at.desc`);
+  return rows || [];
+}
+async function uploadExerciseMedia(exerciseName, file, mediaType, userId) {
+  const ext = file.name.split(".").pop();
+  const path = `${exerciseName.replace(/[^a-z0-9]/gi,"_")}_${Date.now()}.${ext}`;
+  await uploadToStorage("exercise-media", path, file);
+  const url = `${SUPABASE_URL}/storage/v1/object/public/exercise-media/${path}`;
+  const rows = await sbFetch("exercise_media", {
+    method: "POST",
+    body: JSON.stringify({ exercise_name: exerciseName, media_url: url, media_type: mediaType, uploaded_by: userId }),
+  });
+  return rows ? rows[0] : null;
+}
+async function deleteExerciseMedia(id) {
+  await sbFetch(`exercise_media?id=eq.${id}`, { method: "DELETE" });
+}
+
+// ── Progress photos ──
+async function loadProgressPhotos(userId, viewUserId) {
+  const targetUser = viewUserId || userId;
+  const rows = await sbFetch(`progress_photos?user_id=eq.${targetUser}&order=date.desc`);
+  if (!rows) return [];
+  // Get signed URLs for each photo since bucket is private
+  const withUrls = await Promise.all(rows.map(async (r) => ({
+    ...r,
+    signedUrl: await getSignedUrl("progress-photos", r.media_url),
+  })));
+  return withUrls;
+}
+async function uploadProgressPhoto(date, angle, file, userId) {
+  const ext = file.name.split(".").pop();
+  const path = `${userId}/${date}_${angle}_${Date.now()}.${ext}`;
+  await uploadToStorage("progress-photos", path, file);
+  const rows = await sbFetch("progress_photos", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, date, angle, media_url: path }),
+  });
+  return rows ? rows[0] : null;
+}
+async function deleteProgressPhoto(id, path) {
+  await sbFetch(`progress_photos?id=eq.${id}`, { method: "DELETE" });
+  await deleteFromStorage("progress-photos", path);
+}
+
+
 
 let currentAccessToken = null;
 function setAccessToken(token) { currentAccessToken = token; }
@@ -252,7 +343,91 @@ const RestTimer = ({ restDuration, setRestDuration, timerRef: externalRef }) => 
   );
 };
 
-function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpdateSets, defaultSets=3, currentSessionId }) {
+// ── Exercise Media (reference images/video per exercise) ──
+function ExerciseMediaButton({ exName, isAdmin, userId }) {
+  const [open, setOpen] = useState(false);
+  const [media, setMedia] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  async function load() {
+    setLoading(true);
+    try { setMedia(await loadExerciseMedia(exName)); } catch(e) { console.error(e); }
+    setLoading(false);
+  }
+
+  function handleOpen() { setOpen(true); load(); }
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const mediaType = file.type.startsWith("video") ? "video" : "image";
+      await uploadExerciseMedia(exName, file, mediaType, userId);
+      await load();
+    } catch(err) {
+      console.error(err);
+      alert("Kunde inte ladda upp: " + err.message);
+    }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  async function handleDelete(id) {
+    await deleteExerciseMedia(id);
+    await load();
+  }
+
+  return (
+    <>
+      <button onClick={handleOpen} style={{ background:"none", border:"none", color:"#3a6888", cursor:"pointer", fontSize:15, padding:"2px 4px", flexShrink:0 }} title="Visa övningsguide">📷</button>
+      {open && (
+        <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:20, padding:"20px 18px", maxWidth:480, width:"100%", maxHeight:"85vh", overflowY:"auto" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+              <div style={{ fontSize:16, fontWeight:800, color:"#fff" }}>{exName}</div>
+              <button onClick={() => setOpen(false)} style={{ background:"none", border:"none", color:"#4488aa", fontSize:20, cursor:"pointer" }}>✕</button>
+            </div>
+
+            {loading ? (
+              <div style={{ textAlign:"center", color:"#334455", padding:30 }}>Laddar…</div>
+            ) : media.length === 0 ? (
+              <div style={{ textAlign:"center", color:"#334455", padding:30, fontSize:13 }}>Ingen guide uppladdad än</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:14 }}>
+                {media.map(m => (
+                  <div key={m.id} style={{ position:"relative", borderRadius:12, overflow:"hidden", background:"#0a0e14" }}>
+                    {m.media_type === "video" ? (
+                      <video src={m.media_url} controls style={{ width:"100%", display:"block" }}/>
+                    ) : (
+                      <img src={m.media_url} alt={exName} style={{ width:"100%", display:"block" }}/>
+                    )}
+                    {isAdmin && (
+                      <button onClick={() => handleDelete(m.id)} style={{ position:"absolute", top:8, right:8, background:"rgba(20,5,10,0.85)", border:"none", color:"#ff4466", borderRadius:8, padding:"5px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>✕ Ta bort</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isAdmin && (
+              <div>
+                <input ref={fileRef} type="file" accept="image/*,video/*" onChange={handleUpload} style={{ display:"none" }}/>
+                <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ width:"100%", padding:"12px", borderRadius:10, background: uploading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:14, cursor: uploading ? "default" : "pointer" }}>
+                  {uploading ? "⏳ Laddar upp…" : "➕ Lägg till bild/video"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpdateSets, defaultSets=3, currentSessionId, isAdmin, userId }) {
   const prevSets = (() => {
     // Exclude sets from current session
     const entries = log.filter(e => 
@@ -300,7 +475,10 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <div style={{ width:28, height:28, borderRadius:8, background:BLUE_DIM, color:BLUE, fontWeight:900, fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{exIdx+1}</div>
           <div>
-            <div style={{ fontWeight:700, fontSize:15, color:"#c0d8f0" }}>{exName}</div>
+            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <div style={{ fontWeight:700, fontSize:15, color:"#c0d8f0" }}>{exName}</div>
+              <ExerciseMediaButton exName={exName} isAdmin={isAdmin} userId={userId}/>
+            </div>
             {prevSets.length===0 && <div style={{ fontSize:11, color:"#2a4455" }}>Ingen tidigare data</div>}
             {prevSets.length>0 && (
               <div style={{ fontSize:11, color:"#3a6888", marginTop:1 }}>
@@ -473,17 +651,19 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
 function ExercisePicker({ value, onChange, onSubmit, existingNames=[], placeholder="Ny övning…" }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const closeTimer = useRef(null);
 
   const filtered = value.trim()
     ? existingNames.filter(n => n.toLowerCase().includes(value.trim().toLowerCase()))
     : existingNames;
   const exactMatch = existingNames.some(n => n.toLowerCase() === value.trim().toLowerCase());
 
-  useEffect(() => {
-    function handleClick(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  function handleBlur() {
+    closeTimer.current = setTimeout(() => setOpen(false), 150);
+  }
+  function cancelClose() {
+    clearTimeout(closeTimer.current);
+  }
 
   return (
     <div ref={wrapRef} style={{ position:"relative", flex:1 }}>
@@ -491,12 +671,13 @@ function ExercisePicker({ value, onChange, onSubmit, existingNames=[], placehold
         placeholder={placeholder}
         value={value}
         onFocus={() => setOpen(true)}
+        onBlur={handleBlur}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
         onKeyDown={e => { if (e.key === "Enter") { setOpen(false); onSubmit(); } if (e.key === "Escape") setOpen(false); }}
         style={{ width:"100%", background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 14px", color:"#d0e4f0", fontSize:14, outline:"none", boxSizing:"border-box" }}
       />
       {open && (
-        <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:10, maxHeight:220, overflowY:"auto", zIndex:50, boxShadow:"0 8px 24px rgba(0,0,0,0.4)" }}>
+        <div onMouseDown={cancelClose} style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:10, maxHeight:220, overflowY:"auto", zIndex:50, boxShadow:"0 8px 24px rgba(0,0,0,0.4)" }}>
           {value.trim() && !exactMatch && (
             <div onClick={() => { onSubmit(); setOpen(false); }} style={{ padding:"10px 14px", cursor:"pointer", color:"#50e090", fontSize:13, fontWeight:700, borderBottom: filtered.length ? "1px solid #1a2a3a" : "none" }}>
               + Lägg till "{value.trim()}"
@@ -506,8 +687,7 @@ function ExercisePicker({ value, onChange, onSubmit, existingNames=[], placehold
             <div style={{ padding:"10px 14px", color:"#334455", fontSize:13 }}>Inga sparade övningar än</div>
           )}
           {filtered.map(name => (
-            <div key={name} onClick={() => { onChange(name); setOpen(false); }} style={{ padding:"10px 14px", cursor:"pointer", color:"#c0d8f0", fontSize:13 }}
-              onMouseDown={e => e.preventDefault()}>
+            <div key={name} onClick={() => { onChange(name); setOpen(false); }} style={{ padding:"10px 14px", cursor:"pointer", color:"#c0d8f0", fontSize:13 }}>
               {name}
             </div>
           ))}
@@ -517,7 +697,7 @@ function ExercisePicker({ value, onChange, onSubmit, existingNames=[], placehold
   );
 }
 
-function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId, allExerciseNames=[] }) {
+function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId, allExerciseNames=[], isAdmin, userId }) {
   const [showRestPopup, setShowRestPopup] = useState(false);
   const [nextSet, setNextSet] = useState(null);
   const [exercises, setExercises] = useState(day.exercises.map(e => ({ ...e, uid: uid() })));
@@ -609,7 +789,7 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
                 <button onClick={() => moveDown(idx)} style={{ background:"#111820", border:"none", color:"#4488aa", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>↓</button>
                 <button onClick={() => removeExercise(idx)} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:13 }}>✕</button>
               </div>
-              <ExerciseCard exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest} defaultSets={ex.defaultSets||3} currentSessionId={currentSessionId} onUpdateSets={(newCount) => {
+              <ExerciseCard exName={ex.name||ex} exIdx={idx} exRest={ex.rest||60} log={log} onLogSet={onLogSet} onStartRest={handleStartRest} defaultSets={ex.defaultSets||3} currentSessionId={currentSessionId} isAdmin={isAdmin} userId={userId} onUpdateSets={(newCount) => {
                 setExercises(prev => prev.map((e,i) => i===idx ? {...e, defaultSets: newCount} : e));
                 if (onUpdateProgram) onUpdateProgram(idx, newCount);
               }}/>
@@ -732,7 +912,76 @@ function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted })
 }
 
 // ── Stats Tab ──
-function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBodyWeight, onDateClick }) {
+// ── Progress Photo Compare ──
+function ProgressPhotoCompare({ userId, viewUserId }) {
+  const [photos, setPhotos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [dateA, setDateA] = useState("");
+  const [dateB, setDateB] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const data = await loadProgressPhotos(userId, viewUserId);
+        setPhotos(data);
+        const dates = [...new Set(data.map(p => p.date))].sort((a,b) => b.localeCompare(a));
+        if (dates.length > 0) setDateA(dates[0]);
+        if (dates.length > 1) setDateB(dates[dates.length-1]);
+      } catch(e) { console.error(e); }
+      setLoading(false);
+    }
+    load();
+  }, [userId, viewUserId]);
+
+  const availableDates = [...new Set(photos.map(p => p.date))].sort((a,b) => b.localeCompare(a));
+
+  function photosForDate(date) {
+    const result = { front:null, side:null, back:null };
+    photos.filter(p => p.date === date).forEach(p => { result[p.angle] = p; });
+    return result;
+  }
+
+  if (loading) return null;
+  if (availableDates.length === 0) return null;
+
+  const photosA = photosForDate(dateA);
+  const photosB = photosForDate(dateB);
+
+  return (
+    <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px", marginBottom:16 }}>
+      <div style={{ fontSize:11, color:"#3a6888", letterSpacing:2, textTransform:"uppercase", marginBottom:12 }}>📸 Jämför progress</div>
+
+      <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+        <select value={dateA} onChange={e=>setDateA(e.target.value)} style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"9px 10px", color:BLUE, fontSize:13, fontWeight:700, outline:"none" }}>
+          {availableDates.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select value={dateB} onChange={e=>setDateB(e.target.value)} style={{ flex:1, background:"#0a0e14", border:"1px solid #1a2a3a", borderRadius:10, padding:"9px 10px", color:"#7098b0", fontSize:13, fontWeight:700, outline:"none" }}>
+          {availableDates.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        {[{ date: dateA, set: photosA, color: BLUE },{ date: dateB, set: photosB, color: "#7098b0" }].map((col, ci) => (
+          <div key={ci}>
+            <div style={{ textAlign:"center", fontSize:12, fontWeight:800, color:col.color, marginBottom:8 }}>{col.date}</div>
+            {["front","side","back"].map(angle => (
+              <div key={angle} style={{ marginBottom:8, borderRadius:10, overflow:"hidden", background:"#0a0e14", aspectRatio:"3/4", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {col.set[angle] ? (
+                  <img src={col.set[angle].signedUrl} alt={angle} style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                ) : (
+                  <div style={{ color:"#223344", fontSize:11 }}>{angle === "front" ? "Fram" : angle === "side" ? "Sida" : "Bak"} saknas</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBodyWeight, onDateClick, userId, viewUserId }) {
   const [statsView, setStatsView] = useState("overview"); // overview | exercise | bodyweight | calendar
   const [selectedExercise, setSelectedExercise] = useState("");
   const [bwForm, setBwForm] = useState({ date: new Date().toISOString().slice(0,10), weight: "" });
@@ -798,15 +1047,35 @@ function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBody
     );
   }
 
+  const [progressPhotos, setProgressPhotos] = useState({ front:null, side:null, back:null });
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const fileRefs = { front: useRef(null), side: useRef(null), back: useRef(null) };
+
   async function addBodyWeight() {
     if (!bwForm.weight) return;
+    let savedId = null;
     try {
       const saved = await insertBodyWeight(bwForm);
+      savedId = saved?.id;
       setBodyWeight(prev => [saved || { ...bwForm, id: uid() }, ...prev]);
       setBwForm(f => ({ ...f, weight: "" }));
     } catch(e) {
       setBodyWeight(prev => [{ ...bwForm, id: uid() }, ...prev]);
       setBwForm(f => ({ ...f, weight: "" }));
+    }
+    // Upload any attached progress photos
+    const targetUser = viewUserId || userId;
+    const angles = Object.keys(progressPhotos).filter(a => progressPhotos[a]);
+    if (angles.length > 0 && targetUser) {
+      setUploadingPhotos(true);
+      try {
+        for (const angle of angles) {
+          await uploadProgressPhoto(bwForm.date, angle, progressPhotos[angle], targetUser);
+        }
+      } catch(e) { console.error("Photo upload error:", e); }
+      setProgressPhotos({ front:null, side:null, back:null });
+      Object.values(fileRefs).forEach(r => { if (r.current) r.current.value = ""; });
+      setUploadingPhotos(false);
     }
   }
 
@@ -954,8 +1223,28 @@ function StatsTab({ log, bodyWeight, setBodyWeight, insertBodyWeight, deleteBody
               <input type="date" value={bwForm.date} onChange={e => setBwForm(f => ({ ...f, date: e.target.value }))} style={{ ...inputStyle, flex:1, marginBottom:0 }}/>
               <input type="number" placeholder="Vikt (kg)" value={bwForm.weight} onChange={e => setBwForm(f => ({ ...f, weight: e.target.value }))} style={{ ...inputStyle, flex:1, marginBottom:0 }}/>
             </div>
-            <button onClick={addBodyWeight} style={{ width:"100%", padding:"12px", borderRadius:12, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color:"#fff", fontWeight:800, fontSize:14, border:"none", cursor:"pointer", marginTop:10 }}>Logga vikt</button>
+
+            {/* Progress photos */}
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontSize:11, color:"#3a6888", letterSpacing:1, marginBottom:8 }}>PROGRESSBILDER (valfritt)</div>
+              <div style={{ display:"flex", gap:8 }}>
+                {[{ key:"front", label:"Fram" },{ key:"side", label:"Sida" },{ key:"back", label:"Bak" }].map(({key,label}) => (
+                  <div key={key} style={{ flex:1 }}>
+                    <input ref={fileRefs[key]} type="file" accept="image/*" onChange={e => setProgressPhotos(p => ({ ...p, [key]: e.target.files?.[0] || null }))} style={{ display:"none" }}/>
+                    <button onClick={() => fileRefs[key].current?.click()} style={{ width:"100%", padding:"10px 4px", borderRadius:10, border:`1px dashed ${progressPhotos[key] ? "#207050" : BLUE_DARK}`, background: progressPhotos[key] ? "#0a1810" : "transparent", color: progressPhotos[key] ? "#50e090" : BLUE, fontWeight:700, fontSize:12, cursor:"pointer" }}>
+                      {progressPhotos[key] ? `✓ ${label}` : `📷 ${label}`}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={addBodyWeight} disabled={uploadingPhotos} style={{ width:"100%", padding:"12px", borderRadius:12, background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, color:"#fff", fontWeight:800, fontSize:14, border:"none", cursor:"pointer", marginTop:10 }}>
+              {uploadingPhotos ? "⏳ Laddar upp bilder…" : "Logga vikt"}
+            </button>
           </div>
+
+          <ProgressPhotoCompare userId={userId} viewUserId={viewUserId}/>
 
           {bwData.length >= 2 && (
             <div style={{ background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:16, padding:"16px 18px", marginBottom:16 }}>
@@ -1813,7 +2102,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
         {tab==="logg"&&(
           <div>
             {activeDay?(
-              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} allExerciseNames={allExerciseNames} onUpdateProgram={(exIdx, newSetCount) => {
+              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} allExerciseNames={allExerciseNames} isAdmin={isAdmin} userId={userId} onUpdateProgram={(exIdx, newSetCount) => {
                 setPrograms(prev => prev.map(p => p.id === selectedProgramId ? {
                   ...p, days: p.days.map(d => d.id === activeDay.id ? {
                     ...d, exercises: d.exercises.map((e,i) => i === exIdx ? {...e, defaultSets: newSetCount} : e)
@@ -1863,7 +2152,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
         )}
 
         {tab==="stats"&&(
-          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={(entry) => insertBodyWeight(entry, viewUserId || userId)} deleteBodyWeight={deleteBodyWeight} onDateClick={(date) => { setSelectedLogDate(date); setTab("logg"); }}/>
+          <StatsTab log={log} bodyWeight={bodyWeight} setBodyWeight={setBodyWeight} insertBodyWeight={(entry) => insertBodyWeight(entry, viewUserId || userId)} deleteBodyWeight={deleteBodyWeight} onDateClick={(date) => { setSelectedLogDate(date); setTab("logg"); }} userId={userId} viewUserId={viewUserId}/>
         )}
 
         {tab==="wod"&&(
