@@ -1963,12 +1963,14 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
               </select>
             )}
             {!passActive && (
-              {!isAdmin && !subscriptionActive && trialActive && (
-                <div style={{ background:"#1a1408", border:"1px solid #4a3a10", color:"#ffaa00", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700 }}>
-                  {daysLeftInTrial}d kvar i trial
-                </div>
-              )}
-              <button onClick={onLogout} style={{ background:"none", border:"1px solid #2a3a4a", color:"#4488aa", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Logga ut</button>
+              <>
+                {!isAdmin && !subscriptionActive && trialActive && (
+                  <div style={{ background:"#1a1408", border:"1px solid #4a3a10", color:"#ffaa00", borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700 }}>
+                    {daysLeftInTrial}d kvar i trial
+                  </div>
+                )}
+                <button onClick={onLogout} style={{ background:"none", border:"1px solid #2a3a4a", color:"#4488aa", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Logga ut</button>
+              </>
             )}
             {passActive && (
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
