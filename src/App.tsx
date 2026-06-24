@@ -228,13 +228,26 @@ async function loadLog(userId, viewUserId) {
 async function insertLog(entry, userId) {
   const rows = await sbFetch("workout_log", {
     method: "POST",
-    body: JSON.stringify({ exercise: entry.exercise, sets: entry.sets, reps: entry.reps, weight: entry.weight, date: entry.date, session_id: entry.sessionId, user_id: userId }),
+    body: JSON.stringify({ exercise: entry.exercise, sets: entry.sets, reps: entry.reps, weight: entry.weight, date: entry.date, session_id: entry.sessionId, comment: entry.comment || null, user_id: userId }),
   });
   return rows ? rows[0] : null;
 }
 
 async function deleteLogEntry(id) {
   await sbFetch(`workout_log?id=eq.${id}`, { method: "DELETE" });
+}
+
+async function loadSessionComments(userId, viewUserId) {
+  const targetUser = viewUserId || userId;
+  const rows = await sbFetch(`session_comments?user_id=eq.${targetUser}&order=created_at.desc`);
+  return rows || [];
+}
+async function insertSessionComment(sessionId, comment, userId) {
+  const rows = await sbFetch("session_comments", {
+    method: "POST",
+    body: JSON.stringify({ session_id: String(sessionId), comment, user_id: userId }),
+  });
+  return rows ? rows[0] : null;
 }
 
 async function loadBodyWeight(userId, viewUserId) {
@@ -443,6 +456,9 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
   const initCount = Math.max(prevSets.length || 0, defaultSets);
   const [sets, setSets] = useState(() => Array.from({length: initCount}, (_,i) => makeSet(i)));
   const [showPrev, setShowPrev] = useState(true);
+  const [comment, setComment] = useState("");
+  const [showComment, setShowComment] = useState(false);
+  const [commentSaved, setCommentSaved] = useState(false);
 
   function updateSet(id,field,val) { setSets(prev=>prev.map(s=>s.id===id?{...s,[field]:val}:s)); }
   function toggleDone(id) {
@@ -451,7 +467,7 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
     const newDone=!set.done;
     setSets(prev=>prev.map(s=>s.id===id?{...s,done:newDone}:s));
     if (newDone) {
-      onLogSet({ exercise:exName, sets:"1", reps:set.reps, weight:set.weight, date:new Date().toISOString().slice(0,10) });
+      onLogSet({ exercise:exName, sets:"1", reps:set.reps, weight:set.weight, date:new Date().toISOString().slice(0,10), comment: comment.trim() || null });
       const currentIdx = sets.findIndex(s => s.id === id);
       const nextUndone = sets.slice(currentIdx + 1).find(s => !s.done);
       onStartRest({ exercise:exName, reps: nextUndone?.reps || set.reps, weight: nextUndone?.weight || set.weight, rest: exRest });
@@ -478,6 +494,7 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
             <div style={{ display:"flex", alignItems:"center", gap:4 }}>
               <div style={{ fontWeight:700, fontSize:15, color:"#c0d8f0" }}>{exName}</div>
               <ExerciseMediaButton exName={exName} isAdmin={isAdmin} userId={userId}/>
+              <button onClick={() => setShowComment(v=>!v)} style={{ background:"none", border:"none", color: comment.trim() ? "#ffaa00" : "#3a6888", cursor:"pointer", fontSize:14, padding:"2px 4px", flexShrink:0 }} title="Kommentar">💬</button>
             </div>
             {prevSets.length===0 && <div style={{ fontSize:11, color:"#2a4455" }}>Ingen tidigare data</div>}
             {prevSets.length>0 && (
@@ -491,6 +508,17 @@ function ExerciseCard({ exName, exIdx, exRest, log, onLogSet, onStartRest, onUpd
           {doneCount}/{sets.length} set
         </div>
       </div>
+
+      {showComment && (
+        <div style={{ padding:"10px 14px", background:"#0a0e14", borderBottom:"1px solid #1a2a3a" }}>
+          <textarea
+            value={comment}
+            onChange={e => { setComment(e.target.value); setCommentSaved(false); }}
+            placeholder="Kommentar för denna övning (t.ex. 'kändes tungt idag')…"
+            style={{ width:"100%", minHeight:60, background:"#0d1117", border:`1px solid ${comment.trim() ? "#4a3a10" : "#1a2a3a"}`, borderRadius:8, padding:"8px 10px", color:"#d0e4f0", fontSize:13, outline:"none", resize:"vertical", boxSizing:"border-box", fontFamily:"inherit" }}
+          />
+        </div>
+      )}
 
       <div style={{ display:"grid", gridTemplateColumns:"32px 1fr 1fr 1fr 36px", gap:6, padding:"8px 14px 4px", alignItems:"center" }}>
         <div/><div style={{ fontSize:10, color:"#334455", letterSpacing:1, textAlign:"center" }}>SET</div>
@@ -697,7 +725,7 @@ function ExercisePicker({ value, onChange, onSubmit, existingNames=[], placehold
   );
 }
 
-function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId, allExerciseNames=[], isAdmin, userId }) {
+function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration, setRestDuration, isWod, onUpdateProgram, currentSessionId, allExerciseNames=[], isAdmin, userId, onSaveSessionComment }) {
   const [showRestPopup, setShowRestPopup] = useState(false);
   const [nextSet, setNextSet] = useState(null);
   const [exercises, setExercises] = useState(day.exercises.map(e => ({ ...e, uid: uid() })));
@@ -706,6 +734,18 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
   const [wodResult, setWodResult] = useState("");
   const [wodWeight, setWodWeight] = useState("");
   const [wodLogged, setWodLogged] = useState(false);
+  const [sessionComment, setSessionComment] = useState("");
+  const [showSessionComment, setShowSessionComment] = useState(false);
+  const [sessionCommentSaved, setSessionCommentSaved] = useState(false);
+
+  async function saveSessionComment() {
+    if (!sessionComment.trim()) return;
+    try {
+      const saved = await insertSessionComment(currentSessionId, sessionComment.trim(), userId);
+      setSessionCommentSaved(true);
+      if (onSaveSessionComment && saved) onSaveSessionComment(saved);
+    } catch(e) { console.error(e); }
+  }
 
   function handleStartRest(next) { setNextSet(next); if(next?.rest) setRestDuration(next.rest); setShowRestPopup(true); }
   function addExercise() {
@@ -740,6 +780,24 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
           <div style={{ fontSize:28, fontWeight:900, color:"#fff", fontVariantNumeric:"tabular-nums" }}>{formatTime(passSeconds)}</div>
         </div>
         <button onClick={onFinish} style={{ background:"#1a0a14", border:"none", color:"#ff4466", borderRadius:10, padding:"10px 16px", cursor:"pointer", fontWeight:800, fontSize:13 }}>⏹ Avsluta</button>
+      </div>
+
+      {/* Session comment */}
+      <div style={{ marginBottom:16 }}>
+        <button onClick={() => setShowSessionComment(v=>!v)} style={{ width:"100%", padding:"9px", borderRadius:10, border:`1px solid ${sessionComment.trim() ? "#4a3a10" : "#1a2a3a"}`, background: sessionComment.trim() ? "#1a1408" : "transparent", color: sessionComment.trim() ? "#ffaa00" : "#4488aa", fontWeight:700, fontSize:12, cursor:"pointer" }}>
+          💬 {sessionComment.trim() ? "Kommentar för passet ✓" : "Lägg till kommentar för passet"}
+        </button>
+        {showSessionComment && (
+          <div style={{ marginTop:8 }}>
+            <textarea
+              value={sessionComment}
+              onChange={e => { setSessionComment(e.target.value); setSessionCommentSaved(false); }}
+              onBlur={saveSessionComment}
+              placeholder="Hur kändes passet? Något att komma ihåg till nästa gång?"
+              style={{ width:"100%", minHeight:70, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 12px", color:"#d0e4f0", fontSize:13, outline:"none", resize:"vertical", boxSizing:"border-box", fontFamily:"inherit" }}
+            />
+          </div>
+        )}
       </div>
 
       {isWod ? (
@@ -820,7 +878,7 @@ function ActiveWorkout({ day, log, onLogSet, onFinish, passSeconds, restDuration
 }
 
 // ── Log Day Group ──
-function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted }) {
+function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted, sessionComments=[] }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expanded, setExpanded] = useState(!!highlighted);
   const groupRef = useRef(null);
@@ -835,6 +893,9 @@ function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted })
     return acc;
   }, {});
   const exercises = Object.keys(byExercise);
+
+  // Find session comment(s) matching this day's entries
+  const dayCommentEntry = sessionComments.find(sc => entries.some(e => e.session_id === sc.session_id));
 
   useEffect(() => {
     if (highlighted && groupRef.current) {
@@ -864,9 +925,19 @@ function LogDayGroup({ date, entries, onDeleteEntry, onDeleteDay, highlighted })
       {/* Expanded content */}
       {expanded && (
         <div style={{ padding:"12px 14px" }}>
+          {dayCommentEntry && (
+            <div style={{ background:"#1a1408", border:"1px solid #4a3a10", borderRadius:10, padding:"10px 12px", marginBottom:12, fontSize:13, color:"#ffaa00" }}>
+              💬 {dayCommentEntry.comment}
+            </div>
+          )}
           {exercises.map(ex => (
             <div key={ex} style={{ marginBottom:12 }}>
               <div style={{ fontSize:13, fontWeight:800, color:"#c0d8f0", marginBottom:6, paddingBottom:4, borderBottom:"1px solid #1a2a3a" }}>{ex}</div>
+              {byExercise[ex].some(e => e.comment) && (
+                <div style={{ fontSize:12, color:"#ffaa00", background:"#1a1408", borderRadius:8, padding:"6px 10px", marginBottom:6 }}>
+                  💬 {byExercise[ex].find(e => e.comment).comment}
+                </div>
+              )}
               {(() => {
                 const isWodEx = byExercise[ex].length === 1 && (byExercise[ex][0].reps?.includes(":") || byExercise[ex][0].reps?.includes("+") || /^\d+$/.test(byExercise[ex][0].sets||"1") && byExercise[ex][0].sets==="1");
                 const repLabel = byExercise[ex][0]?.reps?.includes(":") ? "TID" : byExercise[ex][0]?.reps?.length > 5 ? "RUNDOR" : "REPS";
@@ -1751,6 +1822,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   const [addingExercise, setAddingExercise] = useState({});
   const [addingRest, setAddingRest] = useState({});
   const [log, setLog] = useState([]);
+  const [sessionComments, setSessionComments] = useState([]);
   const allExerciseNames = [...new Set([
     ...programs.flatMap(p => p.days.flatMap(d => d.exercises.map(e => e.name||e))),
     ...log.map(e => e.exercise),
@@ -1805,10 +1877,11 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   useEffect(() => {
     async function loadAll() {
       try {
-        const [savedPrograms, savedLog, savedBW] = await Promise.all([loadPrograms(userId, viewUserId), loadLog(userId, viewUserId), loadBodyWeight(userId, viewUserId)]);
+        const [savedPrograms, savedLog, savedBW, savedComments] = await Promise.all([loadPrograms(userId, viewUserId), loadLog(userId, viewUserId), loadBodyWeight(userId, viewUserId), loadSessionComments(userId, viewUserId)]);
         if (savedPrograms && savedPrograms.length > 0) setPrograms(savedPrograms);
         if (savedLog) setLog(savedLog);
         if (savedBW) setBodyWeight(savedBW);
+        if (savedComments) setSessionComments(savedComments);
       } catch(e) {
         console.error("Load error:", e);
         // Keep default programs if load fails
@@ -2104,7 +2177,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
         {tab==="logg"&&(
           <div>
             {activeDay?(
-              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} allExerciseNames={allExerciseNames} isAdmin={isAdmin} userId={userId} onUpdateProgram={(exIdx, newSetCount) => {
+              <ActiveWorkout day={activeDay} log={log} onLogSet={handleLogSet} onFinish={finishWorkout} passSeconds={passSeconds} restDuration={restDuration} setRestDuration={setRestDuration} isWod={activeIsWod} currentSessionId={currentSessionId} allExerciseNames={allExerciseNames} isAdmin={isAdmin} userId={userId} onSaveSessionComment={(saved) => setSessionComments(prev => [saved, ...prev])} onUpdateProgram={(exIdx, newSetCount) => {
                 setPrograms(prev => prev.map(p => p.id === selectedProgramId ? {
                   ...p, days: p.days.map(d => d.id === activeDay.id ? {
                     ...d, exercises: d.exercises.map((e,i) => i === exIdx ? {...e, defaultSets: newSetCount} : e)
@@ -2139,6 +2212,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
                           entries={dayEntries}
                           highlighted={date===selectedLogDate}
                           onDeleteEntry={deleteLog}
+                          sessionComments={sessionComments}
                           onDeleteDay={async (entries) => {
                             for (const e of entries) await deleteLog(e.id);
                             if (date===selectedLogDate) setSelectedLogDate(null);
