@@ -2445,8 +2445,8 @@ export default function App() {
 
   if (checking) {
     return (
-      <div style={{ position:"fixed", inset:0, width:"100vw", height:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", zIndex:9999 }}>
-        <img src={LOGO_SRC} alt="FLX Performance" style={{ width:"85vw", height:"85vh", objectFit:"contain" }}/>
+      <div style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", zIndex:9999 }}>
+        <img src={LOGO_SRC} alt="FLX Performance" style={{ width:"85%", height:"85%", maxWidth:500, maxHeight:500, objectFit:"contain" }}/>
       </div>
     );
   }
