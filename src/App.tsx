@@ -363,6 +363,11 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(exName);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [importingId, setImportingId] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -393,6 +398,38 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
     await load();
   }
 
+  async function searchExerciseDB() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/search-exercise-db?q=${encodeURIComponent(searchQuery.trim())}`, {
+        headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
+      });
+      const data = await res.json();
+      setSearchResults(data.results || []);
+    } catch(e) {
+      console.error(e);
+      setSearchResults([]);
+    }
+    setSearching(false);
+  }
+
+  async function importImage(imageUrl, resultId) {
+    setImportingId(resultId);
+    try {
+      const imgRes = await fetch(imageUrl);
+      const blob = await imgRes.blob();
+      const file = new File([blob], "import.jpg", { type: blob.type || "image/jpeg" });
+      await uploadExerciseMedia(exName, file, "image", userId);
+      await load();
+      setShowSearch(false);
+    } catch(e) {
+      console.error(e);
+      alert("Kunde inte importera bilden: " + e.message);
+    }
+    setImportingId(null);
+  }
+
   return (
     <>
       <button onClick={handleOpen} style={{ background:"none", border:"none", color:"#3a6888", cursor:"pointer", fontSize:15, padding:"2px 4px", flexShrink:0 }} title="Visa övningsguide">📷</button>
@@ -404,33 +441,76 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
               <button onClick={() => setOpen(false)} style={{ background:"none", border:"none", color:"#4488aa", fontSize:20, cursor:"pointer" }}>✕</button>
             </div>
 
-            {loading ? (
-              <div style={{ textAlign:"center", color:"#334455", padding:30 }}>Laddar…</div>
-            ) : media.length === 0 ? (
-              <div style={{ textAlign:"center", color:"#334455", padding:30, fontSize:13 }}>Ingen guide uppladdad än</div>
-            ) : (
-              <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:14 }}>
-                {media.map(m => (
-                  <div key={m.id} style={{ position:"relative", borderRadius:12, overflow:"hidden", background:"#0a0e14" }}>
-                    {m.media_type === "video" ? (
-                      <video src={m.media_url} controls style={{ width:"100%", display:"block" }}/>
-                    ) : (
-                      <img src={m.media_url} alt={exName} style={{ width:"100%", display:"block" }}/>
-                    )}
-                    {isAdmin && (
-                      <button onClick={() => handleDelete(m.id)} style={{ position:"absolute", top:8, right:8, background:"rgba(20,5,10,0.85)", border:"none", color:"#ff4466", borderRadius:8, padding:"5px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>✕ Ta bort</button>
-                    )}
+            {!showSearch ? (
+              <>
+                {loading ? (
+                  <div style={{ textAlign:"center", color:"#334455", padding:30 }}>Laddar…</div>
+                ) : media.length === 0 ? (
+                  <div style={{ textAlign:"center", color:"#334455", padding:30, fontSize:13 }}>Ingen guide uppladdad än</div>
+                ) : (
+                  <div style={{ display:"flex", flexDirection:"column", gap:12, marginBottom:14 }}>
+                    {media.map(m => (
+                      <div key={m.id} style={{ position:"relative", borderRadius:12, overflow:"hidden", background:"#0a0e14" }}>
+                        {m.media_type === "video" ? (
+                          <video src={m.media_url} controls style={{ width:"100%", display:"block" }}/>
+                        ) : (
+                          <img src={m.media_url} alt={exName} style={{ width:"100%", display:"block" }}/>
+                        )}
+                        {isAdmin && (
+                          <button onClick={() => handleDelete(m.id)} style={{ position:"absolute", top:8, right:8, background:"rgba(20,5,10,0.85)", border:"none", color:"#ff4466", borderRadius:8, padding:"5px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>✕ Ta bort</button>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
+                )}
 
-            {isAdmin && (
+                {isAdmin && (
+                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    <button onClick={() => { setShowSearch(true); searchExerciseDB(); }} style={{ width:"100%", padding:"12px", borderRadius:10, background:"none", border:`1px solid ${BLUE_DARK}`, color:BLUE, fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                      🔍 Sök i övningsbibliotek
+                    </button>
+                    <input ref={fileRef} type="file" accept="image/*,video/*" onChange={handleUpload} style={{ display:"none" }}/>
+                    <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ width:"100%", padding:"12px", borderRadius:10, background: uploading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:14, cursor: uploading ? "default" : "pointer" }}>
+                      {uploading ? "⏳ Laddar upp…" : "➕ Ladda upp egen bild/video"}
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
               <div>
-                <input ref={fileRef} type="file" accept="image/*,video/*" onChange={handleUpload} style={{ display:"none" }}/>
-                <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ width:"100%", padding:"12px", borderRadius:10, background: uploading ? "#1a2a3a" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", fontWeight:800, fontSize:14, cursor: uploading ? "default" : "pointer" }}>
-                  {uploading ? "⏳ Laddar upp…" : "➕ Lägg till bild/video"}
-                </button>
+                <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+                  <input
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && searchExerciseDB()}
+                    placeholder="Sök övning (engelska funkar bäst)…"
+                    style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 12px", color:"#fff", fontSize:14, outline:"none" }}
+                  />
+                  <button onClick={searchExerciseDB} style={{ background:`linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border:"none", color:"#fff", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontWeight:800 }}>🔍</button>
+                </div>
+
+                {searching ? (
+                  <div style={{ textAlign:"center", color:"#334455", padding:30 }}>Söker…</div>
+                ) : searchResults.length === 0 ? (
+                  <div style={{ textAlign:"center", color:"#334455", padding:30, fontSize:13 }}>Inga resultat. Prova engelskt namn (t.ex. "bench press")</div>
+                ) : (
+                  <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:14 }}>
+                    {searchResults.map(r => (
+                      <div key={r.id} style={{ background:"#0a0e14", borderRadius:12, padding:10, display:"flex", gap:10, alignItems:"center" }}>
+                        {r.images[0] && <img src={r.images[0]} alt={r.name} style={{ width:60, height:60, objectFit:"cover", borderRadius:8, flexShrink:0 }}/>}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#d0e4f0" }}>{r.name}</div>
+                          <div style={{ fontSize:11, color:"#4488aa" }}>{r.equipment || "—"} · {r.primaryMuscles?.join(", ")}</div>
+                        </div>
+                        <button onClick={() => importImage(r.images[0], r.id)} disabled={importingId === r.id || !r.images[0]} style={{ background: importingId===r.id ? "#1a2a3a" : "#0a2010", border:"1px solid #1a3a20", color:"#50e090", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700, flexShrink:0 }}>
+                          {importingId === r.id ? "…" : "+ Importera"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button onClick={() => setShowSearch(false)} style={{ width:"100%", padding:"10px", borderRadius:10, background:"none", border:"1px solid #1a2a3a", color:"#4488aa", fontWeight:700, fontSize:13, cursor:"pointer" }}>← Tillbaka</button>
               </div>
             )}
           </div>
