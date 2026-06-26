@@ -2394,6 +2394,7 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
+      const startTime = Date.now();
       const saved = loadSession();
       if (saved?.refresh_token) {
         const fresh = await refreshSession(saved.refresh_token);
@@ -2410,6 +2411,11 @@ export default function App() {
         } else {
           clearSession();
         }
+      }
+      const elapsed = Date.now() - startTime;
+      const minSplashDuration = 1500; // ms
+      if (elapsed < minSplashDuration) {
+        await new Promise(resolve => setTimeout(resolve, minSplashDuration - elapsed));
       }
       setChecking(false);
     }
@@ -2439,8 +2445,8 @@ export default function App() {
 
   if (checking) {
     return (
-      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10" }}>
-        <img src={LOGO_SRC} alt="FLX" style={{ height:60, opacity:0.6 }}/>
+      <div style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", zIndex:9999 }}>
+        <img src={LOGO_SRC} alt="FLX Performance" style={{ width:"85%", height:"85%", maxWidth:500, maxHeight:500, objectFit:"contain" }}/>
       </div>
     );
   }
