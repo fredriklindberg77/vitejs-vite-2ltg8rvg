@@ -368,6 +368,9 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [importingId, setImportingId] = useState(null);
+  const [showYoutubeInput, setShowYoutubeInput] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [savingYoutube, setSavingYoutube] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -398,6 +401,30 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
     await load();
   }
 
+  function getYoutubeId(url) {
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  async function saveYoutubeLink() {
+    const id = getYoutubeId(youtubeUrl.trim());
+    if (!id) { alert("Kunde inte tolka YouTube-länken. Kontrollera att den är korrekt."); return; }
+    setSavingYoutube(true);
+    try {
+      await sbFetch("exercise_media", {
+        method: "POST",
+        body: JSON.stringify({ exercise_name: exName, media_url: id, media_type: "youtube", uploaded_by: userId }),
+      });
+      setYoutubeUrl("");
+      setShowYoutubeInput(false);
+      await load();
+    } catch(e) {
+      console.error(e);
+      alert("Kunde inte spara länken: " + e.message);
+    }
+    setSavingYoutube(false);
+  }
+
   async function searchExerciseDB() {
     if (!searchQuery.trim()) return;
     setSearching(true);
@@ -414,18 +441,24 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
     setSearching(false);
   }
 
-  async function importImage(imageUrl, resultId) {
+  async function importImage(gifUrl, resultId) {
     setImportingId(resultId);
     try {
-      const imgRes = await fetch(imageUrl);
+      // Download via Edge Function proxy to avoid CORS
+      const proxyUrl = `${SUPABASE_URL}/functions/v1/search-exercise-db?proxy=${encodeURIComponent(gifUrl)}`;
+      const imgRes = await fetch(proxyUrl, {
+        headers: { "Authorization": `Bearer ${SUPABASE_KEY}` }
+      });
+      if (!imgRes.ok) throw new Error("Kunde inte ladda ner bilden");
       const blob = await imgRes.blob();
-      const file = new File([blob], "import.jpg", { type: blob.type || "image/jpeg" });
+      const ext = gifUrl.endsWith(".gif") ? "gif" : "jpg";
+      const file = new File([blob], `import.${ext}`, { type: blob.type || "image/gif" });
       await uploadExerciseMedia(exName, file, "image", userId);
       await load();
       setShowSearch(false);
     } catch(e) {
       console.error(e);
-      alert("Kunde inte importera bilden: " + e.message);
+      alert("Kunde inte importera: " + e.message);
     }
     setImportingId(null);
   }
@@ -453,11 +486,20 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
                       <div key={m.id} style={{ position:"relative", borderRadius:12, overflow:"hidden", background:"#0a0e14" }}>
                         {m.media_type === "video" ? (
                           <video src={m.media_url} controls style={{ width:"100%", display:"block" }}/>
+                        ) : m.media_type === "youtube" ? (
+                          <div style={{ position:"relative", paddingBottom:"56.25%", height:0 }}>
+                            <iframe
+                              src={`https://www.youtube.com/embed/${m.media_url}`}
+                              style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%", border:"none" }}
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          </div>
                         ) : (
                           <img src={m.media_url} alt={exName} style={{ width:"100%", display:"block" }}/>
                         )}
                         {isAdmin && (
-                          <button onClick={() => handleDelete(m.id)} style={{ position:"absolute", top:8, right:8, background:"rgba(20,5,10,0.85)", border:"none", color:"#ff4466", borderRadius:8, padding:"5px 10px", cursor:"pointer", fontSize:12, fontWeight:700 }}>✕ Ta bort</button>
+                          <button onClick={() => handleDelete(m.id)} style={{ position:"absolute", top:8, right:8, background:"rgba(20,5,10,0.85)", border:"none", color:"#ff4466", borderRadius:8, padding:"5px 10px", cursor:"pointer", fontSize:12, fontWeight:700, zIndex:2 }}>✕ Ta bort</button>
                         )}
                       </div>
                     ))}
@@ -466,6 +508,24 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
 
                 {isAdmin && (
                   <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                    {showYoutubeInput ? (
+                      <div style={{ display:"flex", gap:8 }}>
+                        <input
+                          value={youtubeUrl}
+                          onChange={e => setYoutubeUrl(e.target.value)}
+                          onKeyDown={e => e.key === "Enter" && saveYoutubeLink()}
+                          placeholder="Klistra in YouTube-länk…"
+                          style={{ flex:1, background:"#0a0e14", border:`1px solid ${BLUE_DARK}`, borderRadius:10, padding:"10px 12px", color:"#fff", fontSize:13, outline:"none" }}
+                        />
+                        <button onClick={saveYoutubeLink} disabled={savingYoutube} style={{ background:"#0a2010", border:"1px solid #1a3a20", color:"#50e090", borderRadius:10, padding:"10px 14px", cursor:"pointer", fontWeight:700, fontSize:13 }}>
+                          {savingYoutube ? "…" : "Spara"}
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setShowYoutubeInput(true)} style={{ width:"100%", padding:"12px", borderRadius:10, background:"none", border:"1px solid #882020", color:"#ff5050", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                        ▶ Lägg till YouTube-länk
+                      </button>
+                    )}
                     <button onClick={() => { setShowSearch(true); searchExerciseDB(); }} style={{ width:"100%", padding:"12px", borderRadius:10, background:"none", border:`1px solid ${BLUE_DARK}`, color:BLUE, fontWeight:800, fontSize:14, cursor:"pointer" }}>
                       🔍 Sök i övningsbibliotek
                     </button>
@@ -497,13 +557,18 @@ function ExerciseMediaButton({ exName, isAdmin, userId }) {
                   <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:14 }}>
                     {searchResults.map(r => (
                       <div key={r.id} style={{ background:"#0a0e14", borderRadius:12, padding:10, display:"flex", gap:10, alignItems:"center" }}>
-                        {r.images[0] && <img src={r.images[0]} alt={r.name} style={{ width:60, height:60, objectFit:"cover", borderRadius:8, flexShrink:0 }}/>}
+                        {r.gifUrl ? (
+                          <img src={r.gifUrl} alt={r.name} style={{ width:70, height:70, objectFit:"cover", borderRadius:8, flexShrink:0 }}/>
+                        ) : (
+                          <div style={{ width:70, height:70, borderRadius:8, background:"#1a2a3a", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", color:"#334455", fontSize:11 }}>Ingen bild</div>
+                        )}
                         <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:13, fontWeight:700, color:"#d0e4f0" }}>{r.name}</div>
-                          <div style={{ fontSize:11, color:"#4488aa" }}>{r.equipment || "—"} · {r.primaryMuscles?.join(", ")}</div>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#d0e4f0", marginBottom:2 }}>{r.name}</div>
+                          <div style={{ fontSize:11, color:"#4488aa" }}>{r.equipment || "—"}</div>
+                          <div style={{ fontSize:11, color:"#3a6888" }}>{r.primaryMuscles?.join(", ")}</div>
                         </div>
-                        <button onClick={() => importImage(r.images[0], r.id)} disabled={importingId === r.id || !r.images[0]} style={{ background: importingId===r.id ? "#1a2a3a" : "#0a2010", border:"1px solid #1a3a20", color:"#50e090", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:12, fontWeight:700, flexShrink:0 }}>
-                          {importingId === r.id ? "…" : "+ Importera"}
+                        <button onClick={() => importImage(r.gifUrl, r.id)} disabled={importingId === r.id || !r.gifUrl} style={{ background: importingId===r.id ? "#1a2a3a" : "#0a2010", border:"1px solid #1a3a20", color: r.gifUrl ? "#50e090" : "#334455", borderRadius:8, padding:"6px 10px", cursor: r.gifUrl ? "pointer" : "default", fontSize:12, fontWeight:700, flexShrink:0 }}>
+                          {importingId === r.id ? "…" : r.gifUrl ? "+ Importera" : "Ingen bild"}
                         </button>
                       </div>
                     ))}
@@ -2394,7 +2459,6 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      const startTime = Date.now();
       const saved = loadSession();
       if (saved?.refresh_token) {
         const fresh = await refreshSession(saved.refresh_token);
@@ -2411,11 +2475,6 @@ export default function App() {
         } else {
           clearSession();
         }
-      }
-      const elapsed = Date.now() - startTime;
-      const minSplashDuration = 1500; // ms
-      if (elapsed < minSplashDuration) {
-        await new Promise(resolve => setTimeout(resolve, minSplashDuration - elapsed));
       }
       setChecking(false);
     }
@@ -2445,8 +2504,8 @@ export default function App() {
 
   if (checking) {
     return (
-      <div style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", zIndex:9999 }}>
-        <img src={LOGO_SRC} alt="FLX Performance" style={{ width:"85%", height:"85%", maxWidth:500, maxHeight:500, objectFit:"contain" }}/>
+      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10" }}>
+        <img src={LOGO_SRC} alt="FLX" style={{ height:60, opacity:0.6 }}/>
       </div>
     );
   }
