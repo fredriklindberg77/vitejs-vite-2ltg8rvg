@@ -2237,7 +2237,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <button onClick={()=>setShowNewProgram(v=>!v)} style={{ padding:"10px 14px", borderRadius:12, background:"#0a1a10", color:"#50e090", border:"1px dashed #207050", cursor:"pointer", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>+ Nytt</button>
+              {canCreatePrograms && <button onClick={()=>setShowNewProgram(v=>!v)} style={{ padding:"10px 14px", borderRadius:12, background:"#0a1a10", color:"#50e090", border:"1px dashed #207050", cursor:"pointer", fontWeight:700, fontSize:13, whiteSpace:"nowrap" }}>+ Nytt</button>}
             </div>
             {showNewProgram&&(
               <div style={{ display:"flex", gap:8, marginBottom:14 }}>
@@ -2519,7 +2519,7 @@ export default function App() {
   const trialActive = trialEndsAt ? trialEndsAt > new Date() : false;
   const subscriptionActive = profile?.subscription_status === "active";
   const hasFullAccess = profile?.is_admin || subscriptionActive || trialActive;
-
+  const canCreatePrograms = isAdmin || profile?.can_create_programs === true;
   if (!hasFullAccess) {
     return (
       <UpgradeScreen
