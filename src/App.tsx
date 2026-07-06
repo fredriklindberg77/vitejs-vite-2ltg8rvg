@@ -1956,6 +1956,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   const trialActive = trialEndsAt ? trialEndsAt > new Date() : false;
   const subscriptionActive = profile?.subscription_status === "active";
   const hasFullAccess = isAdmin || subscriptionActive || trialActive;
+  const canCreatePrograms = isAdmin || profile?.can_create_programs === true;
   const daysLeftInTrial = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt - new Date()) / (1000*60*60*24))) : 0;
 
   const [tab, setTab] = useState("home");
@@ -2504,8 +2505,8 @@ export default function App() {
 
   if (checking) {
     return (
-      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10" }}>
-        <img src={LOGO_SRC} alt="FLX" style={{ height:60, opacity:0.6 }}/>
+      <div style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#080c10", zIndex:9999 }}>
+        <img src={LOGO_SRC} alt="FLX Performance" style={{ width:"70%", maxWidth:280, objectFit:"contain" }}/>
       </div>
     );
   }
@@ -2519,7 +2520,7 @@ export default function App() {
   const trialActive = trialEndsAt ? trialEndsAt > new Date() : false;
   const subscriptionActive = profile?.subscription_status === "active";
   const hasFullAccess = profile?.is_admin || subscriptionActive || trialActive;
-  const canCreatePrograms = isAdmin || profile?.can_create_programs === true;
+
   if (!hasFullAccess) {
     return (
       <UpgradeScreen
