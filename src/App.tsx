@@ -37,8 +37,8 @@ async function refreshSession(refreshToken) {
   return res.json();
 }
 
-async function getProfile(accessToken) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=*`, {
+async function getProfile(accessToken, userId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
     headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${accessToken}` },
   });
   if (!res.ok) return null;
@@ -2467,7 +2467,7 @@ export default function App() {
           setAccessToken(fresh.access_token);
           saveSession(fresh);
           setSession(fresh);
-          const p = await getProfile(fresh.access_token);
+          const p = await getProfile(fresh.access_token, fresh.user.id);
           setProfile(p);
           if (p?.is_admin) {
             const all = await getAllProfiles(fresh.access_token);
@@ -2486,7 +2486,7 @@ export default function App() {
     setAccessToken(newSession.access_token);
     saveSession(newSession);
     setSession(newSession);
-    const p = await getProfile(newSession.access_token);
+    const p = await getProfile(newSession.access_token, newSession.user.id);
     setProfile(p);
     if (p?.is_admin) {
       const all = await getAllProfiles(newSession.access_token);
