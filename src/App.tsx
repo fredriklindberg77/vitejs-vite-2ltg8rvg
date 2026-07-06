@@ -37,8 +37,8 @@ async function refreshSession(refreshToken) {
   return res.json();
 }
 
-async function getProfile(accessToken) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=*`, {
+async function getProfile(accessToken, userId) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=*`, {
     headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${accessToken}` },
   });
   if (!res.ok) return null;
@@ -52,22 +52,6 @@ async function getAllProfiles(accessToken) {
   });
   if (!res.ok) return [];
   return res.json();
-}
-
-async function updateUserPermission(userId, field, value) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`, {
-    method: "PATCH",
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-    },
-    body: JSON.stringify({ [field]: value }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  const rows = await res.json();
-  return rows?.[0] || null;
 }
 
 function saveSession(session) {
@@ -1963,7 +1947,7 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onLogout, setAllProfiles }) {
+function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onLogout }) {
   const userId = session.user.id;
   const isAdmin = profile?.is_admin;
 
@@ -2219,40 +2203,6 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
           </div>
         </div>
       </div>
-
-      {!passActive && isAdmin && viewUserId && viewUserId !== userId && (() => {
-        const viewedUser = allProfiles.find(p => p.id === viewUserId);
-        if (!viewedUser) return null;
-        return (
-          <div style={{ background:"#0a1420", borderBottom:"1px solid #1a2a3a", padding:"12px 20px" }}>
-            <div style={{ fontSize:11, color:BLUE, letterSpacing:2, textTransform:"uppercase", marginBottom:8 }}>👤 Admin: {viewedUser.email}</div>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0d1117", border:"1px solid #1a2a3a", borderRadius:10, padding:"10px 14px" }}>
-              <div>
-                <div style={{ fontSize:13, fontWeight:700, color:"#c0d8f0" }}>Får skapa egna program</div>
-                <div style={{ fontSize:11, color:"#4488aa", marginTop:2 }}>{viewedUser.can_create_programs ? "Aktiverat" : "Låst – ser bara delade program"}</div>
-              </div>
-              <button
-                onClick={async () => {
-                  try {
-                    const updated = await updateUserPermission(viewUserId, "can_create_programs", !viewedUser.can_create_programs);
-                    if (updated) setAllProfiles(prev => prev.map(p => p.id === viewUserId ? updated : p));
-                  } catch(e) { alert("Kunde inte uppdatera: " + e.message); }
-                }}
-                style={{
-                  width:52, height:28, borderRadius:14, border:"none", cursor:"pointer",
-                  background: viewedUser.can_create_programs ? "#207050" : "#2a3a4a",
-                  position:"relative", transition:"background 0.2s", flexShrink:0
-                }}
-              >
-                <div style={{
-                  width:22, height:22, borderRadius:"50%", background:"#fff", position:"absolute", top:3,
-                  left: viewedUser.can_create_programs ? 27 : 3, transition:"left 0.2s"
-                }}/>
-              </button>
-            </div>
-          </div>
-        );
-      })()}
 
       <div style={{ display:"flex", background:"#0d1117", borderBottom:"1px solid #1a2a3a" }}>
         {tabs.map(t=>(
@@ -2517,7 +2467,7 @@ export default function App() {
           setAccessToken(fresh.access_token);
           saveSession(fresh);
           setSession(fresh);
-          const p = await getProfile(fresh.access_token);
+          const p = await getProfile(fresh.access_token, fresh.user.id);
           setProfile(p);
           if (p?.is_admin) {
             const all = await getAllProfiles(fresh.access_token);
@@ -2536,7 +2486,7 @@ export default function App() {
     setAccessToken(newSession.access_token);
     saveSession(newSession);
     setSession(newSession);
-    const p = await getProfile(newSession.access_token);
+    const p = await getProfile(newSession.access_token, newSession.user.id);
     setProfile(p);
     if (p?.is_admin) {
       const all = await getAllProfiles(newSession.access_token);
@@ -2588,10 +2538,9 @@ export default function App() {
       session={session}
       profile={profile}
       allProfiles={allProfiles}
-      viewUserId={viewUserId}
+      viewUaserId={viewUserId}
       setViewUserId={setViewUserId}
       onLogout={handleLogout}
-      setAllProfiles={setAllProfiles}
     />
   );
 }
