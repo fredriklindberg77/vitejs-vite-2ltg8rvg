@@ -226,7 +226,7 @@ async function savePrograms(data, userId) {
           "Content-Type": "application/json",
           "Prefer": "return=representation",
         },
-        body: JSON.stringify({ id: uid(), user_id: userId, data, updated_at: new Date().toISOString() }),
+        body: JSON.stringify({ user_id: userId, data, updated_at: new Date().toISOString() }),
       });
     }
   } catch(e) {
