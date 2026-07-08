@@ -204,6 +204,54 @@ async function loadPrograms(userId, viewUserId) {
   return null;
 }
 
+async function assignProgramToClient(program, clientUserId) {
+  // Load client's existing programs
+  const rows = await sbFetch(`programs?user_id=eq.${clientUserId}&order=updated_at.desc&limit=1`);
+  const existing = (rows && rows.length > 0) ? rows[0].data : [];
+
+  // Deep-copy program with fresh ids so it's fully theirs
+  const copy = {
+    ...program,
+    id: uid(),
+    assignedByAdmin: true,
+    days: (program.days || []).map(d => ({
+      ...d,
+      id: uid(),
+      exercises: (d.exercises || []).map(e => ({ ...e })),
+    })),
+  };
+
+  const newData = [...existing, copy];
+
+  if (rows && rows.length > 0) {
+    // Client already has a programs row → PATCH
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/programs?user_id=eq.${clientUserId}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+      },
+      body: JSON.stringify({ data: newData, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } else {
+    // No row yet → INSERT
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/programs`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${currentAccessToken || SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+      },
+      body: JSON.stringify({ user_id: clientUserId, data: newData, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  }
+}
+
 async function savePrograms(data, userId) {
   try {
     const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/programs?user_id=eq.${userId}`, {
@@ -1979,6 +2027,9 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   const [programs, setPrograms] = useState(DEFAULT_PROGRAMS);
   const [selectedProgramId, setSelectedProgramId] = useState(DEFAULT_PROGRAMS[0].id);
   const [editMode, setEditMode] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [assigning, setAssigning] = useState(null);
+  const [assignDone, setAssignDone] = useState(null);
   const [showNewProgram, setShowNewProgram] = useState(false);
   const [newProgramName, setNewProgramName] = useState("");
   const [addingExercise, setAddingExercise] = useState({});
@@ -2304,6 +2355,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                 <div style={{ fontSize:15, fontWeight:800, color:"#c0d8f0" }}>{selectedProgram.name}</div>
                 <div style={{ display:"flex", gap:8 }}>
+                  {isAdmin && <button onClick={()=>setShowAssign(true)} style={smallBtn("#0a1a10","#50e090")}>👥 Tilldela</button>}
                   <button onClick={()=>setEditMode(v=>!v)} style={smallBtn(editMode?BLUE_DIM:"#111820",editMode?BLUE:"#4488aa")}>{editMode?"✓ Klar":"✏️ Redigera"}</button>
                   {programs.length>1&&<button onClick={()=>deleteProgram(selectedProgram.id)} style={smallBtn("#1a0a0a","#ff4466")}>🗑</button>}
                 </div>
@@ -2371,6 +2423,48 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
             {selectedProgram&&selectedProgram.days.length===0&&!editMode&&(
               <div style={{ textAlign:"center", color:"#223344", padding:40, fontSize:14 }}>Inga pass ännu.<br/>Tryck på <strong style={{ color:BLUE }}>✏️ Redigera</strong> för att lägga till!</div>
             )}
+          </div>
+        )}
+
+        {/* Assign program to client popup */}
+        {showAssign && selectedProgram && (
+          <div onClick={() => { setShowAssign(false); setAssignDone(null); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background:"#0d1117", border:`1px solid ${BLUE_DARK}`, borderRadius:20, padding:"20px 18px", maxWidth:420, width:"100%", maxHeight:"85vh", overflowY:"auto" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+                <div style={{ fontSize:16, fontWeight:800, color:"#fff" }}>Tilldela program</div>
+                <button onClick={() => { setShowAssign(false); setAssignDone(null); }} style={{ background:"none", border:"none", color:"#4488aa", fontSize:20, cursor:"pointer" }}>✕</button>
+              </div>
+              <div style={{ fontSize:13, color:"#4488aa", marginBottom:16 }}>Kopiera "<span style={{ color:BLUE, fontWeight:700 }}>{selectedProgram.name}</span>" till en klient. De får sin egen version att redigera.</div>
+
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {allProfiles.filter(p => p.id !== userId).length === 0 ? (
+                  <div style={{ textAlign:"center", color:"#334455", padding:20, fontSize:13 }}>Inga andra användare än</div>
+                ) : (
+                  allProfiles.filter(p => p.id !== userId).map(client => (
+                    <div key={client.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#0a0e14", borderRadius:10, padding:"10px 14px" }}>
+                      <div style={{ fontSize:13, color:"#d0e4f0", flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis" }}>{client.email}</div>
+                      <button
+                        onClick={async () => {
+                          setAssigning(client.id);
+                          setAssignDone(null);
+                          try {
+                            await assignProgramToClient(selectedProgram, client.id);
+                            setAssignDone(client.id);
+                          } catch(e) {
+                            alert("Kunde inte tilldela: " + e.message);
+                          }
+                          setAssigning(null);
+                        }}
+                        disabled={assigning === client.id}
+                        style={{ background: assignDone===client.id ? "#0a2010" : `linear-gradient(135deg,${BLUE},${BLUE_DARK})`, border: assignDone===client.id ? "1px solid #1a3a20" : "none", color: assignDone===client.id ? "#50e090" : "#fff", borderRadius:8, padding:"7px 12px", cursor:"pointer", fontSize:12, fontWeight:700, flexShrink:0, marginLeft:10 }}
+                      >
+                        {assigning===client.id ? "…" : assignDone===client.id ? "✓ Tilldelad" : "Tilldela"}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         )}
 
