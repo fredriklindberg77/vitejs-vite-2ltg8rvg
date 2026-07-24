@@ -374,17 +374,35 @@ const RestTimer = ({ restDuration, setRestDuration, timerRef: externalRef }) => 
   const [restRunning, setRestRunning] = useState(false);
   const [restDone, setRestDone] = useState(false);
   const restRef = useRef(null);
+  const endTimeRef = useRef(null);
   useEffect(() => { if (!restRunning) setRestSeconds(restDuration); }, [restDuration]);
   useEffect(() => {
     if (restRunning) {
       restRef.current = setInterval(() => {
-        setRestSeconds(s => { if (s<=1) { clearInterval(restRef.current); setRestRunning(false); setRestDone(true); return 0; } return s-1; });
-      }, 1000);
+        const remaining = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+        setRestSeconds(remaining);
+        if (remaining <= 0) {
+          clearInterval(restRef.current);
+          setRestRunning(false);
+          setRestDone(true);
+        }
+      }, 250);
     } else clearInterval(restRef.current);
     return () => clearInterval(restRef.current);
   }, [restRunning]);
-  function start() { setRestSeconds(restDuration); setRestDone(false); setRestRunning(true); }
-  function stop() { setRestRunning(false); setRestSeconds(restDuration); setRestDone(false); }
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === "visible" && restRunning && endTimeRef.current) {
+        const remaining = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+        setRestSeconds(remaining);
+        if (remaining <= 0) { setRestRunning(false); setRestDone(true); }
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [restRunning]);
+  function start() { endTimeRef.current = Date.now() + restDuration * 1000; setRestSeconds(restDuration); setRestDone(false); setRestRunning(true); }
+  function stop() { setRestRunning(false); setRestSeconds(restDuration); setRestDone(false); endTimeRef.current = null; }
   useEffect(() => { if (externalRef) externalRef.current = { start }; });
   const r=34, circ=2*Math.PI*r, dash=circ*(restDuration>0?restSeconds/restDuration:1);
   return (
@@ -778,22 +796,56 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
   const [restRunning, setRestRunning] = useState(true);
   const [minimized, setMinimized] = useState(false);
   const restRef = useRef(null);
+  const endTimeRef = useRef(Date.now() + restDuration * 1000);
+  const beepedRef = useRef(false);
+
+  // Restart timer whenever duration changes or timer is (re)started
+  function startRest(seconds) {
+    endTimeRef.current = Date.now() + seconds * 1000;
+    beepedRef.current = false;
+    setRestSeconds(seconds);
+    setRestRunning(true);
+  }
 
   useEffect(() => {
-    setRestSeconds(restDuration);
-    setRestRunning(true);
+    startRest(restDuration);
   }, []);
 
   useEffect(() => {
     if (restRunning) {
       restRef.current = setInterval(() => {
-        setRestSeconds(s => {
-          if (s <= 1) { clearInterval(restRef.current); setRestRunning(false); playBeep(); setTimeout(() => onClose(), 2000); return 0; }
-          return s - 1;
-        });
-      }, 1000);
-    } else clearInterval(restRef.current);
+        const remaining = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+        setRestSeconds(remaining);
+        if (remaining <= 0 && !beepedRef.current) {
+          beepedRef.current = true;
+          clearInterval(restRef.current);
+          setRestRunning(false);
+          playBeep();
+          setTimeout(() => onClose(), 2000);
+        }
+      }, 250);
+    } else {
+      clearInterval(restRef.current);
+    }
     return () => clearInterval(restRef.current);
+  }, [restRunning]);
+
+  // Recalculate immediately when returning from background/lock
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === "visible" && restRunning) {
+        const remaining = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
+        setRestSeconds(remaining);
+        if (remaining <= 0 && !beepedRef.current) {
+          beepedRef.current = true;
+          setRestRunning(false);
+          playBeep();
+          setTimeout(() => onClose(), 2000);
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [restRunning]);
 
   const done = restSeconds === 0 && !restRunning;
@@ -871,7 +923,7 @@ function RestPopup({ restDuration, setRestDuration, onClose, nextSet }) {
         {/* Quick duration buttons */}
         <div style={{ display:"flex", gap:8 }}>
           {[30,60,90,120].map(sec => (
-            <button key={sec} onClick={() => { setRestDuration(sec); setRestSeconds(sec); setRestRunning(true); }}
+            <button key={sec} onClick={() => { setRestDuration(sec); startRest(sec); }}
               style={{ padding:"6px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:restDuration===sec?BLUE:"#1a2a3a", color:restDuration===sec?"#fff":"#4488aa" }}>{sec}s</button>
           ))}
         </div>
@@ -2087,6 +2139,7 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   const [flashPhase, setFlashPhase] = useState(false);
   const intervalRef = useRef(null);
   const timerRef = useRef(null);
+  const timerAnchorRef = useRef({ start: 0, base: 0 });
 
   // ── Load data on mount ──
   useEffect(() => {
@@ -2143,11 +2196,41 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
     return () => clearInterval(passRef.current);
   }, [passActive]);
 
+  // Sync timers immediately when app returns from background/screen lock
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState !== "visible") return;
+      if (passActive && passStartTime.current) {
+        setPassSeconds(Math.floor((Date.now() - passStartTime.current) / 1000));
+      }
+      if (timerRunning && timerAnchorRef.current.start) {
+        const elapsed = Math.floor((Date.now() - timerAnchorRef.current.start) / 1000);
+        if (timerMode === "countdown") {
+          const remaining = Math.max(0, timerAnchorRef.current.base - elapsed);
+          setTimerSeconds(remaining);
+          if (remaining <= 0) setTimerRunning(false);
+        } else {
+          setTimerSeconds(timerAnchorRef.current.base + elapsed);
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [passActive, timerRunning, timerMode]);
+
   useEffect(() => {
     if (timerRunning) {
+      timerAnchorRef.current = { start: Date.now(), base: timerSeconds };
       timerRef.current = setInterval(()=>{
-        setTimerSeconds(s=>{ if(timerMode==="countdown"){if(s<=1){setTimerRunning(false);return 0;}return s-1;}return s+1; });
-      },1000);
+        const elapsed = Math.floor((Date.now() - timerAnchorRef.current.start) / 1000);
+        if (timerMode === "countdown") {
+          const remaining = Math.max(0, timerAnchorRef.current.base - elapsed);
+          setTimerSeconds(remaining);
+          if (remaining <= 0) setTimerRunning(false);
+        } else {
+          setTimerSeconds(timerAnchorRef.current.base + elapsed);
+        }
+      },250);
     } else clearInterval(timerRef.current);
     return()=>clearInterval(timerRef.current);
   }, [timerRunning, timerMode]);
