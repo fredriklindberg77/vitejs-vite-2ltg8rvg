@@ -2030,6 +2030,8 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
   const [showAssign, setShowAssign] = useState(false);
   const [assigning, setAssigning] = useState(null);
   const [assignDone, setAssignDone] = useState(null);
+  const [copyingToMe, setCopyingToMe] = useState(false);
+  const [copyToMeDone, setCopyToMeDone] = useState(false);
   const [showNewProgram, setShowNewProgram] = useState(false);
   const [newProgramName, setNewProgramName] = useState("");
   const [addingExercise, setAddingExercise] = useState({});
@@ -2355,7 +2357,20 @@ function MainApp({ session, profile, allProfiles, viewUserId, setViewUserId, onL
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                 <div style={{ fontSize:15, fontWeight:800, color:"#c0d8f0" }}>{selectedProgram.name}</div>
                 <div style={{ display:"flex", gap:8 }}>
-                  {isAdmin && <button onClick={()=>setShowAssign(true)} style={smallBtn("#0a1a10","#50e090")}>👥 Tilldela</button>}
+                  {isAdmin && viewUserId && viewUserId !== userId && (
+                    <button onClick={async () => {
+                      setCopyingToMe(true);
+                      try {
+                        await assignProgramToClient(selectedProgram, userId);
+                        setCopyToMeDone(true);
+                        setTimeout(() => setCopyToMeDone(false), 2500);
+                      } catch(e) { alert("Kunde inte kopiera: " + e.message); }
+                      setCopyingToMe(false);
+                    }} disabled={copyingToMe} style={smallBtn(copyToMeDone?"#0a2010":"#0a1420", copyToMeDone?"#50e090":BLUE)}>
+                      {copyingToMe ? "…" : copyToMeDone ? "✓ Kopierad" : "⬇ Kopiera till mig"}
+                    </button>
+                  )}
+                  {isAdmin && (!viewUserId || viewUserId === userId) && <button onClick={()=>setShowAssign(true)} style={smallBtn("#0a1a10","#50e090")}>👥 Tilldela</button>}
                   <button onClick={()=>setEditMode(v=>!v)} style={smallBtn(editMode?BLUE_DIM:"#111820",editMode?BLUE:"#4488aa")}>{editMode?"✓ Klar":"✏️ Redigera"}</button>
                   {programs.length>1&&<button onClick={()=>deleteProgram(selectedProgram.id)} style={smallBtn("#1a0a0a","#ff4466")}>🗑</button>}
                 </div>
